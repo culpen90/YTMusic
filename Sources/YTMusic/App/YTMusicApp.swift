@@ -36,13 +36,13 @@ struct YTMusicApp: App {
 
         Divider()
 
-        Button(model.currentRating == .liked ? "Remove Like" : "Like Current Song") {
-          model.toggleRating(.liked)
+        Button(model.currentRating == .liked ? "Current Song Is Liked" : "Like Current Song") {
+          model.likeCurrentSong()
         }
-        .disabled(model.player.currentTrack == nil)
+        .disabled(model.player.currentTrack == nil || model.currentRating == .liked)
 
         Button(model.currentRating == .disliked ? "Remove Dislike" : "Dislike Current Song") {
-          model.toggleRating(.disliked)
+          model.toggleCurrentSongDislike()
         }
         .disabled(model.player.currentTrack == nil)
 

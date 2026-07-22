@@ -8,7 +8,7 @@ Its storage rule is deliberate:
 - **Download** is the only action that keeps an audio file. Kept songs appear in the offline Library.
 - **Playlists store URLs only.** Each entry contains a YouTube URL plus lightweight display metadata. Links can be added while metadata lookup is unavailable. Playback uses an existing Library copy when available; otherwise it streams the song without saving it.
 - **Autoplay prepares the handoff.** While a song is playing, YTMusic chooses a radio recommendation and resolves its transient stream in the background. Playlist order takes priority, and radio continues after the final playlist song when Autoplay is on.
-- **Thumbs tune future choices.** Likes and dislikes are stored locally as lightweight song metadata. Disliked songs are excluded, and feedback about an artist changes how later radio candidates are ranked.
+- **Thumbs tune future choices.** Likes and dislikes are stored locally as lightweight song metadata. One thumbs up adds a song to Favorites and stays selected; removing it from Favorites or choosing thumbs down takes it back out. Disliked songs are excluded, and feedback about an artist changes how later radio candidates are ranked.
 
 ## Requirements
 
@@ -55,7 +55,7 @@ Use YTMusic only for media you own or are authorized to download, such as your o
 
 ## Architecture
 
-- SwiftUI `NavigationSplitView` for Discover, Downloads, Library, and URL-only playlists
+- SwiftUI `NavigationSplitView` for Discover, Downloads, Library, automatic Favorites, and URL-only playlists
 - Shell-free `Foundation.Process` runner with tagged JSON progress, EOF-safe output draining, and cancellable child process groups
 - App-controlled staging and path validation before every import
 - Atomic JSON persistence with backups, recovery, and rollback for kept tracks and playlist references

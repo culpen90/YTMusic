@@ -53,6 +53,48 @@ final class FeedbackStoreTests: XCTestCase {
     XCTAssertNil(FeedbackStore(rootDirectory: rootDirectory).rating(for: item.id))
   }
 
+  func testFavoritesContainOnlyCurrentThumbsUpsAcrossReload() {
+    var timestamp = 1_700_000_000.0
+    let store = FeedbackStore(rootDirectory: rootDirectory) {
+      defer { timestamp += 1 }
+      return Date(timeIntervalSince1970: timestamp)
+    }
+    let first = song(id: "favorite-first", artist: "First Artist")
+    let second = song(id: "favorite-second", artist: "Second Artist")
+    let disliked = song(id: "disliked-song", artist: "Other Artist")
+
+    store.setRating(.liked, for: first)
+    store.setRating(.liked, for: second)
+    store.setRating(.liked, for: second)
+    store.setRating(.disliked, for: disliked)
+
+    XCTAssertEqual(store.favoriteItems, [second, first])
+    XCTAssertEqual(store.records.filter { $0.id == second.id }.count, 1)
+
+    let reloaded = FeedbackStore(rootDirectory: rootDirectory)
+    XCTAssertEqual(reloaded.favoriteItems, [second, first])
+
+    reloaded.setRating(.disliked, for: second)
+    XCTAssertEqual(reloaded.favoriteItems, [first])
+
+    reloaded.setRating(nil, for: first)
+    XCTAssertTrue(reloaded.favoriteItems.isEmpty)
+    XCTAssertTrue(FeedbackStore(rootDirectory: rootDirectory).favoriteItems.isEmpty)
+  }
+
+  func testRepeatedThumbsUpKeepsOneFavorite() {
+    let item = song(id: "toggle-favorite", artist: "Example Artist")
+    let store = FeedbackStore(rootDirectory: rootDirectory)
+
+    store.setRating(.liked, for: item)
+    store.setRating(.liked, for: item)
+
+    XCTAssertEqual(store.rating(for: item), .liked)
+    XCTAssertEqual(store.favoriteItems, [item])
+    XCTAssertEqual(store.records.count, 1)
+    XCTAssertEqual(FeedbackStore(rootDirectory: rootDirectory).favoriteItems, [item])
+  }
+
   func testReloadedLikeStillInfluencesRecommendationRanking() {
     let store = FeedbackStore(rootDirectory: rootDirectory)
     store.setRating(.liked, for: song(id: "liked-source", artist: "Favorite Artist"))

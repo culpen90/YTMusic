@@ -43,6 +43,12 @@ final class FeedbackStore {
     rating(for: item.id)
   }
 
+  var favoriteItems: [SearchResult] {
+    records.compactMap { record in
+      record.rating == .liked ? record.item : nil
+    }
+  }
+
   func setRating(_ rating: SongRating?, for item: SearchResult) {
     guard !item.id.isEmpty else { return }
 

@@ -81,6 +81,17 @@ struct RootView: View {
       }
 
       Section {
+        HStack {
+          Label("Favorites", systemImage: "heart.fill")
+          Spacer()
+          if !model.feedback.favoriteItems.isEmpty {
+            Text("\(model.feedback.favoriteItems.count)")
+              .font(.caption2)
+              .foregroundStyle(.secondary)
+          }
+        }
+        .tag(SidebarSelection.favorites)
+
         ForEach(model.playlists.playlists) { playlist in
           Label(playlist.name, systemImage: "music.note.list")
             .tag(SidebarSelection.playlist(playlist.id))
@@ -122,6 +133,8 @@ struct RootView: View {
       LibraryView(model: model)
     case .downloads:
       DownloadsView(model: model)
+    case .favorites:
+      FavoritesView(model: model)
     case .playlist(let id):
       PlaylistView(model: model, playlistID: id)
     }

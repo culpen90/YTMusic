@@ -5,6 +5,7 @@ enum SidebarSelection: Hashable {
   case discover
   case library
   case downloads
+  case favorites
   case playlist(UUID)
 }
 
@@ -87,13 +88,28 @@ final class AppModel {
     beginPlayback(of: item)
   }
 
-  func toggleRating(_ rating: SongRating) {
+  func likeCurrentSong() {
     guard let item = player.currentTrack?.metadata else { return }
-    let updatedRating: SongRating? = feedback.rating(for: item) == rating ? nil : rating
-    feedback.setRating(updatedRating, for: item)
-    if queuedPlaylistItem(after: item) == nil {
-      prepareNext(after: item)
-    }
+    updateRating(.liked, for: item)
+  }
+
+  func toggleCurrentSongDislike() {
+    guard let item = player.currentTrack?.metadata else { return }
+    let updatedRating: SongRating? = feedback.rating(for: item) == .disliked ? nil : .disliked
+    updateRating(updatedRating, for: item)
+  }
+
+  func removeFromFavorites(_ item: SearchResult) {
+    guard feedback.rating(for: item) == .liked else { return }
+    updateRating(nil, for: item)
+  }
+
+  private func updateRating(_ rating: SongRating?, for item: SearchResult) {
+    feedback.setRating(rating, for: item)
+    guard let currentItem = player.currentTrack?.metadata,
+      queuedPlaylistItem(after: currentItem) == nil
+    else { return }
+    prepareNext(after: currentItem)
   }
 
   func toggleAutoplay() {
@@ -149,6 +165,13 @@ final class AppModel {
     else { return }
     playlistSession = PlaylistSession(items: playlist.items, index: index)
     beginPlayback(of: playlist.items[index], preservePlaylistSession: true)
+  }
+
+  func playFavorites(startingAt index: Int = 0) {
+    let items = feedback.favoriteItems
+    guard items.indices.contains(index) else { return }
+    playlistSession = PlaylistSession(items: items, index: index)
+    beginPlayback(of: items[index], preservePlaylistSession: true)
   }
 
   func next() {

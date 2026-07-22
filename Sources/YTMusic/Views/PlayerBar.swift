@@ -61,7 +61,7 @@ struct PlayerBar: View {
       VStack(spacing: 7) {
         HStack(spacing: 18) {
           Button {
-            model.toggleRating(.disliked)
+            model.toggleCurrentSongDislike()
           } label: {
             Image(
               systemName: model.currentRating == .disliked
@@ -108,7 +108,7 @@ struct PlayerBar: View {
           .disabled(!model.canPlayNext)
 
           Button {
-            model.toggleRating(.liked)
+            model.likeCurrentSong()
           } label: {
             Image(
               systemName: model.currentRating == .liked
@@ -117,8 +117,8 @@ struct PlayerBar: View {
             .foregroundStyle(model.currentRating == .liked ? .green : .secondary)
           }
           .buttonStyle(.plain)
-          .disabled(model.player.currentTrack == nil)
-          .help(model.currentRating == .liked ? "Remove like" : "Like this song")
+          .disabled(model.player.currentTrack == nil || model.currentRating == .liked)
+          .help(model.currentRating == .liked ? "Already in Favorites" : "Like this song")
           .accessibilityLabel("Like current song")
         }
 
