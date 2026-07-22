@@ -35,6 +35,10 @@ open dist/Liltfinch.app
 
 `make app` creates an ad-hoc-signed universal Apple Silicon/Intel app bundle at `dist/Liltfinch.app` and a clean portable archive at `dist/Liltfinch.zip`. The build verifies the app before archiving and verifies a fresh extraction of the ZIP. Use the ZIP when copying the app out of an iCloud/File Provider folder, since Finder metadata added to the convenience app copy can invalidate its signature after the build. For distribution to other Macs, sign and notarize with your Developer ID and either require Homebrew tools or prepare a compliant, signed helper bundle with all third-party licenses.
 
+## Change the app version
+
+Edit the single line in [`VERSION`](VERSION), then run `make app`. Use `MAJOR.MINOR.PATCH` for a stable release or append `-betaN` for a beta, such as `1.0.0-beta2`. The full value appears in Liltfinch's Settings, while the build derives Apple's numeric marketing and build versions (`1.0.0` and `2` for that example) and checks the finished app and ZIP before reporting success.
+
 ## Audio quality
 
 The download format setting applies to songs kept in the Library. The default **Best available** mode selects `bestaudio/best` and asks yt-dlp/FFmpeg to preserve the source audio without another lossy encode. ALAC, M4A, and MP3 are available for saved downloads. Play Once instead selects an AVPlayer-compatible stereo AAC stream so playback can begin without a full-file transfer or conversion.
