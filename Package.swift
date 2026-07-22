@@ -3,25 +3,25 @@
 import PackageDescription
 
 let package = Package(
-  name: "YTMusic",
+  name: "Liltfinch",
   platforms: [
     .macOS(.v14)
   ],
   products: [
-    .executable(name: "YTMusic", targets: ["YTMusic"])
+    .executable(name: "Liltfinch", targets: ["Liltfinch"])
   ],
   targets: [
     .executableTarget(
-      name: "YTMusic",
-      path: "Sources/YTMusic",
+      name: "Liltfinch",
+      path: "Sources/Liltfinch",
       resources: [
         .process("Resources")
       ]
     ),
     .testTarget(
-      name: "YTMusicTests",
-      dependencies: ["YTMusic"],
-      path: "Tests/YTMusicTests"
+      name: "LiltfinchTests",
+      dependencies: ["Liltfinch"],
+      path: "Tests/LiltfinchTests"
     ),
   ]
 )

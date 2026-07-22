@@ -266,7 +266,7 @@ struct DependencyBanner: View {
         .foregroundStyle(.orange)
       VStack(alignment: .leading, spacing: 3) {
         Text("Downloader setup needed").font(.headline)
-        Text("YTMusic needs yt-dlp and FFmpeg. You can install or configure them in Settings.")
+        Text("Liltfinch needs yt-dlp and FFmpeg. You can install or configure them in Settings.")
           .font(.caption)
           .foregroundStyle(.secondary)
       }

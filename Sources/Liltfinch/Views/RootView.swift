@@ -160,7 +160,7 @@ private struct BrandHeader: View {
       .frame(width: 38, height: 38)
 
       VStack(alignment: .leading, spacing: 1) {
-        Text("YTMusic")
+        Text("Liltfinch")
           .font(.headline)
         Text("Play clean. Keep by choice.")
           .font(.caption2)

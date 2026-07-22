@@ -1,7 +1,7 @@
 import AVFoundation
 import XCTest
 
-@testable import YTMusic
+@testable import Liltfinch
 
 @MainActor
 final class StorageBehaviorTests: XCTestCase {
@@ -11,7 +11,7 @@ final class StorageBehaviorTests: XCTestCase {
   override func setUp() {
     super.setUp()
     let base = FileManager.default.temporaryDirectory
-      .appendingPathComponent("YTMusicTests-\(UUID().uuidString)", isDirectory: true)
+      .appendingPathComponent("LiltfinchTests-\(UUID().uuidString)", isDirectory: true)
     testRoot = base.appendingPathComponent("Library", isDirectory: true)
     cacheRoot = base.appendingPathComponent("Cache", isDirectory: true)
   }
@@ -528,7 +528,7 @@ final class StorageBehaviorTests: XCTestCase {
       ),
       let samples = buffer.floatChannelData?[0]
     else {
-      throw NSError(domain: "YTMusicTests", code: 1)
+      throw NSError(domain: "LiltfinchTests", code: 1)
     }
     buffer.frameLength = buffer.frameCapacity
     for frame in 0..<Int(buffer.frameLength) {

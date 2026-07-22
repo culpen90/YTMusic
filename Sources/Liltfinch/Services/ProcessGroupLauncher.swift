@@ -2,10 +2,10 @@ import Darwin
 import Foundation
 
 enum ProcessGroupLauncher {
-  static let marker = "--ytmusic-process-group-launcher"
+  static let marker = "--liltfinch-process-group-launcher"
 
   static var executableURL: URL? {
-    guard let url = Bundle.main.executableURL, url.lastPathComponent == "YTMusic" else {
+    guard let url = Bundle.main.executableURL, url.lastPathComponent == "Liltfinch" else {
       return nil
     }
     return url
@@ -20,7 +20,7 @@ enum ProcessGroupLauncher {
     let processID = getpid()
     guard getpgrp() == processID || setpgid(0, 0) == 0 else {
       writeFailure(
-        "YTMusic could not create a process group: \(String(cString: strerror(errno)))")
+        "Liltfinch could not create a process group: \(String(cString: strerror(errno)))")
     }
 
     var pointers: [UnsafeMutablePointer<CChar>?] =
@@ -35,7 +35,8 @@ enum ProcessGroupLauncher {
         execv(path, buffer.baseAddress)
       }
     }
-    writeFailure("YTMusic could not launch \(executablePath): \(String(cString: strerror(errno)))")
+    writeFailure(
+      "Liltfinch could not launch \(executablePath): \(String(cString: strerror(errno)))")
   }
 
   private static func writeFailure(_ message: String) -> Never {

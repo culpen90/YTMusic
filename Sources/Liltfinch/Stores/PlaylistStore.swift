@@ -27,7 +27,7 @@ final class PlaylistStore {
     guard Self.isSecureDirectory(self.rootDirectory) else {
       persistenceAvailable = false
       errorMessage =
-        "Playlist storage is disabled because YTMusic's managed Library folder is unsafe."
+        "Playlist storage is disabled because Liltfinch's managed Library folder is unsafe."
       return
     }
     load()

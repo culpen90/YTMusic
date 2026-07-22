@@ -51,7 +51,7 @@ struct SettingsView: View {
 
       Section {
         Text(
-          "Only download media you own or have permission to save. YTMusic does not bypass DRM, private access, or platform restrictions."
+          "Only download media you own or have permission to save. Liltfinch does not bypass DRM, private access, or platform restrictions."
         )
         .font(.caption)
         .foregroundStyle(.secondary)

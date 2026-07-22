@@ -1,7 +1,7 @@
 import Foundation
 import XCTest
 
-@testable import YTMusic
+@testable import Liltfinch
 
 final class RecommendationServiceTests: XCTestCase {
   func testBuildsRadioMixAndSearchArgumentsInFallbackOrder() throws {

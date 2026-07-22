@@ -1,6 +1,6 @@
 import XCTest
 
-@testable import YTMusic
+@testable import Liltfinch
 
 @MainActor
 final class AutoplayStoreTests: XCTestCase {
@@ -17,12 +17,12 @@ final class AutoplayStoreTests: XCTestCase {
   override func setUpWithError() throws {
     try super.setUpWithError()
     baseDirectory = FileManager.default.temporaryDirectory
-      .appendingPathComponent("YTMusicAutoplayTests-\(UUID().uuidString)", isDirectory: true)
+      .appendingPathComponent("LiltfinchAutoplayTests-\(UUID().uuidString)", isDirectory: true)
     rootDirectory = baseDirectory.appendingPathComponent("Library", isDirectory: true)
     cacheDirectory = baseDirectory.appendingPathComponent("Cache", isDirectory: true)
     try FileManager.default.createDirectory(at: rootDirectory, withIntermediateDirectories: true)
 
-    defaultsSuiteName = "YTMusicAutoplayTests.\(UUID().uuidString)"
+    defaultsSuiteName = "LiltfinchAutoplayTests.\(UUID().uuidString)"
     defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsSuiteName))
     defaults.removePersistentDomain(forName: defaultsSuiteName)
   }

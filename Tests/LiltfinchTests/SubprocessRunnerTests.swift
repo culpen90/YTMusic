@@ -1,6 +1,6 @@
 import XCTest
 
-@testable import YTMusic
+@testable import Liltfinch
 
 final class SubprocessRunnerTests: XCTestCase {
   func testArgumentsArePassedLiterallyWithoutShellEvaluation() async throws {

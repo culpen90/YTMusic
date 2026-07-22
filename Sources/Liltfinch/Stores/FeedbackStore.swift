@@ -29,7 +29,7 @@ final class FeedbackStore {
     guard Self.isSecureDirectory(self.rootDirectory) else {
       persistenceAvailable = false
       errorMessage =
-        "Rating storage is disabled because YTMusic's managed Library folder is unsafe."
+        "Rating storage is disabled because Liltfinch's managed Library folder is unsafe."
       return
     }
     load()

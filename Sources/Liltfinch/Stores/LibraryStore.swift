@@ -12,7 +12,7 @@ enum LibraryError: LocalizedError {
     case .invalidArtifact:
       "The completed audio file could not be imported safely."
     case .unsafeStorage:
-      "YTMusic stopped because one of its managed storage folders is unsafe or unavailable."
+      "Liltfinch stopped because one of its managed storage folders is unsafe or unavailable."
     case .persistenceUnavailable:
       "Library changes are disabled because the existing library metadata could not be read."
     }
@@ -34,6 +34,7 @@ final class LibraryStore {
   let temporaryPlaybackDirectory: URL
 
   private let fileManager: FileManager
+  private let legacyRootDirectory: URL?
   private let metadataURL: URL
   private let metadataBackupURL: URL
   private var persistenceAvailable = true
@@ -41,19 +42,37 @@ final class LibraryStore {
   init(
     fileManager: FileManager = .default,
     rootOverride: URL? = nil,
-    cacheOverride: URL? = nil
+    cacheOverride: URL? = nil,
+    applicationSupportDirectoryOverride: URL? = nil,
+    cachesDirectoryOverride: URL? = nil
   ) {
     self.fileManager = fileManager
-    let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-    rootDirectory = rootOverride ?? appSupport.appendingPathComponent("YTMusic", isDirectory: true)
+    let appSupport =
+      applicationSupportDirectoryOverride
+      ?? fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    let storageResolution =
+      rootOverride.map {
+        AppStorageResolution(rootDirectory: $0, legacyRootDirectory: nil, warning: nil)
+      }
+      ?? AppMigration.resolveApplicationSupportRoot(
+        fileManager: fileManager,
+        baseDirectory: appSupport)
+    rootDirectory = storageResolution.rootDirectory
+    legacyRootDirectory = storageResolution.legacyRootDirectory
     mediaDirectory = rootDirectory.appendingPathComponent("Media", isDirectory: true)
     artworkDirectory = rootDirectory.appendingPathComponent("Artwork", isDirectory: true)
     recoveryDirectory = rootDirectory.appendingPathComponent("Recovered", isDirectory: true)
     metadataURL = rootDirectory.appendingPathComponent("library.json")
     metadataBackupURL = rootDirectory.appendingPathComponent("library.backup.json")
 
-    let caches = fileManager.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-    cacheDirectory = cacheOverride ?? caches.appendingPathComponent("YTMusic", isDirectory: true)
+    let caches =
+      cachesDirectoryOverride
+      ?? fileManager.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+    cacheDirectory =
+      cacheOverride
+      ?? AppMigration.resolveCacheRoot(
+        fileManager: fileManager,
+        baseDirectory: caches)
     stagingDirectory = cacheDirectory.appendingPathComponent("Staging", isDirectory: true)
     temporaryPlaybackDirectory = cacheDirectory.appendingPathComponent(
       "PlayOnce", isDirectory: true)
@@ -67,7 +86,29 @@ final class LibraryStore {
       return
     }
     load()
+    if persistenceAvailable, legacyRootDirectory != nil {
+      do {
+        try finalizeLegacyMetadataMigration()
+      } catch {
+        persistenceAvailable = false
+        errorMessage =
+          "The legacy Library metadata could not be migrated safely: \(error.localizedDescription)"
+        return
+      }
+    }
+    if persistenceAvailable {
+      do {
+        try AppMigration.completeStorageMigration(
+          fileManager: fileManager,
+          rootDirectory: rootDirectory)
+      } catch {
+        errorMessage = "The storage migration could not be finalized: \(error.localizedDescription)"
+      }
+    }
     reconcileOrphanedFiles()
+    if errorMessage == nil {
+      errorMessage = storageResolution.warning
+    }
   }
 
   var totalSize: Int64 {
@@ -276,7 +317,7 @@ final class LibraryStore {
     let folder = track.audioURL.deletingLastPathComponent().standardizedFileURL
     guard pathEntryExists(folder) else { return }
     guard isManagedDirectory(folder, directlyInside: temporaryPlaybackDirectory) else {
-      errorMessage = "Refused to remove a temporary file outside YTMusic's cache."
+      errorMessage = "Refused to remove a temporary file outside Liltfinch's cache."
       return
     }
     do {
@@ -290,7 +331,7 @@ final class LibraryStore {
     let standardized = url.standardizedFileURL
     guard pathEntryExists(standardized) else { return }
     guard isManagedDirectory(standardized, directlyInside: stagingDirectory) else {
-      errorMessage = "Refused to remove a staging folder outside YTMusic's cache."
+      errorMessage = "Refused to remove a staging folder outside Liltfinch's cache."
       return
     }
     do {
@@ -347,7 +388,7 @@ final class LibraryStore {
       do {
         let result = try decodeTracks(from: metadataURL)
         tracks = result.tracks
-        if result.discardedUnsafeEntries { try save() }
+        if result.requiresSave { try save() }
         return
       } catch {
         recoverFromBackup(after: error)
@@ -361,7 +402,7 @@ final class LibraryStore {
   }
 
   private func decodeTracks(from url: URL) throws -> (
-    tracks: [Track], discardedUnsafeEntries: Bool
+    tracks: [Track], requiresSave: Bool
   ) {
     guard isManagedRegularFile(url, directlyInside: rootDirectory) else {
       throw LibraryError.unsafeStorage
@@ -374,15 +415,34 @@ final class LibraryStore {
     var seenAudioPaths = Set<String>()
     var seenArtworkPaths = Set<String>()
     var safeTracks: [Track] = []
+    var migratedLegacyPaths = false
     for decodedTrack in decoded {
-      let canonicalAudioPath = decodedTrack.audioURL.resolvingSymlinksInPath().path
-      guard decodedTrack.storage == .library,
-        decodedTrack.audioURL.deletingPathExtension().lastPathComponent == decodedTrack.id,
-        isManagedRegularFile(decodedTrack.audioURL, directlyInside: mediaDirectory),
-        seenIDs.insert(decodedTrack.id).inserted,
+      var track = decodedTrack
+      if let migratedAudioPath = migratedManagedPath(
+        track.localFilePath,
+        legacySubdirectory: "Media",
+        currentDirectory: mediaDirectory)
+      {
+        track.localFilePath = migratedAudioPath
+        migratedLegacyPaths = true
+      }
+      if let artworkPath = track.localArtworkFilePath,
+        let migratedArtworkPath = migratedManagedPath(
+          artworkPath,
+          legacySubdirectory: "Artwork",
+          currentDirectory: artworkDirectory)
+      {
+        track.localArtworkFilePath = migratedArtworkPath
+        migratedLegacyPaths = true
+      }
+
+      let canonicalAudioPath = track.audioURL.resolvingSymlinksInPath().path
+      guard track.storage == .library,
+        track.audioURL.deletingPathExtension().lastPathComponent == track.id,
+        isManagedRegularFile(track.audioURL, directlyInside: mediaDirectory),
+        seenIDs.insert(track.id).inserted,
         seenAudioPaths.insert(canonicalAudioPath).inserted
       else { continue }
-      var track = decodedTrack
       if let artworkURL = track.artworkURL {
         let canonicalArtworkPath = artworkURL.resolvingSymlinksInPath().path
         if !isManagedRegularFile(artworkURL, directlyInside: artworkDirectory)
@@ -393,7 +453,21 @@ final class LibraryStore {
       }
       safeTracks.append(track)
     }
-    return (safeTracks, safeTracks.count != decoded.count)
+    return (safeTracks, safeTracks.count != decoded.count || migratedLegacyPaths)
+  }
+
+  private func migratedManagedPath(
+    _ path: String,
+    legacySubdirectory: String,
+    currentDirectory: URL
+  ) -> String? {
+    guard let legacyRootDirectory else { return nil }
+    let legacyDirectory = legacyRootDirectory.appendingPathComponent(
+      legacySubdirectory, isDirectory: true
+    ).standardizedFileURL
+    let candidate = URL(fileURLWithPath: path).standardizedFileURL
+    guard candidate.deletingLastPathComponent() == legacyDirectory else { return nil }
+    return currentDirectory.appendingPathComponent(candidate.lastPathComponent).path
   }
 
   private func recoverFromBackup(after primaryError: Error?) {
@@ -409,7 +483,8 @@ final class LibraryStore {
     }
 
     do {
-      let recovered = try decodeTracks(from: metadataBackupURL).tracks
+      let recoveryResult = try decodeTracks(from: metadataBackupURL)
+      let recovered = recoveryResult.tracks
       if pathEntryExists(metadataURL) {
         guard isManagedRegularFile(metadataURL, directlyInside: rootDirectory) else {
           throw LibraryError.unsafeStorage
@@ -422,6 +497,12 @@ final class LibraryStore {
       try data.write(to: metadataURL, options: .atomic)
       guard isManagedRegularFile(metadataURL, directlyInside: rootDirectory) else {
         throw LibraryError.unsafeStorage
+      }
+      if recoveryResult.requiresSave {
+        try data.write(to: metadataBackupURL, options: .atomic)
+        guard isManagedRegularFile(metadataBackupURL, directlyInside: rootDirectory) else {
+          throw LibraryError.unsafeStorage
+        }
       }
       tracks = recovered
       errorMessage = "Library metadata was restored from its last valid backup."
@@ -449,6 +530,24 @@ final class LibraryStore {
     } catch {
       errorMessage = error.localizedDescription
       throw error
+    }
+  }
+
+  private func finalizeLegacyMetadataMigration() throws {
+    guard pathEntryExists(metadataURL) || pathEntryExists(metadataBackupURL) else { return }
+    guard persistenceAvailable, isSecureDirectory(rootDirectory), isSecureDirectory(mediaDirectory),
+      isSecureDirectory(artworkDirectory)
+    else { throw LibraryError.persistenceUnavailable }
+
+    let data = try encodedTracks(tracks)
+    for url in [metadataURL, metadataBackupURL] {
+      guard !pathEntryExists(url) || isManagedRegularFile(url, directlyInside: rootDirectory) else {
+        throw LibraryError.unsafeStorage
+      }
+      try data.write(to: url, options: .atomic)
+      guard isManagedRegularFile(url, directlyInside: rootDirectory) else {
+        throw LibraryError.unsafeStorage
+      }
     }
   }
 
