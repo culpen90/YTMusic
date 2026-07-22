@@ -93,12 +93,37 @@ struct DownloadArtifact {
 }
 
 private struct PlaybackStreamOutput: Decodable {
+  let id: String?
   let url: String
   let httpHeaders: [String: String]?
+  let duration: Double?
+  let sponsorBlockChapters: [SponsorBlockChapter]?
 
   private enum CodingKeys: String, CodingKey {
-    case url
+    case id, url, duration
     case httpHeaders = "http_headers"
+    case sponsorBlockChapters = "sponsorblock_chapters"
+  }
+}
+
+private struct SponsorBlockChapter: Decodable {
+  let startTime: Double?
+  let endTime: Double?
+  let category: String?
+  let type: String?
+
+  private enum CodingKeys: String, CodingKey {
+    case category, type
+    case startTime = "start_time"
+    case endTime = "end_time"
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    startTime = try? container.decode(Double.self, forKey: .startTime)
+    endTime = try? container.decode(Double.self, forKey: .endTime)
+    category = try? container.decode(String.self, forKey: .category)
+    type = try? container.decode(String.self, forKey: .type)
   }
 }
 
@@ -256,10 +281,22 @@ final class YTDLPService {
       throw YTDLPError.invalidYouTubeURL
     }
 
-    let response = try await runJSON(
-      Self.playbackStreamArguments(for: url, denoURL: toolchain.denoURL))
+    let response: String
+    do {
+      response = try await runJSON(
+        Self.playbackStreamArguments(for: url, denoURL: toolchain.denoURL))
+    } catch {
+      if Self.isCancellation(error) { throw error }
+      guard Self.isSponsorBlockFailure(error) else { throw error }
+      response = try await runJSON(
+        Self.playbackStreamArguments(
+          for: url,
+          denoURL: toolchain.denoURL,
+          includeMusicSections: false
+        ))
+    }
     try Task.checkCancellation()
-    return try Self.parsePlaybackStream(response)
+    return try Self.parsePlaybackStream(response, expectedVideoID: item.id)
   }
 
   func download(
@@ -519,7 +556,11 @@ final class YTDLPService {
     }
   }
 
-  static func playbackStreamArguments(for url: URL, denoURL: URL?) -> [String] {
+  static func playbackStreamArguments(
+    for url: URL,
+    denoURL: URL?,
+    includeMusicSections: Bool = true
+  ) -> [String] {
     var arguments = [
       "--ignore-config",
       "--no-playlist",
@@ -529,15 +570,25 @@ final class YTDLPService {
     if let denoURL {
       arguments += ["--js-runtimes", "deno:\(denoURL.path)"]
     }
+    if includeMusicSections {
+      arguments += ["--sponsorblock-mark", "music_offtopic"]
+    }
+    let printTemplate =
+      includeMusicSections
+      ? #"{"id":%(id)j,"url":%(url)j,"http_headers":%(http_headers)j,"duration":%(duration)j,"sponsorblock_chapters":%(sponsorblock_chapters)j}"#
+      : #"{"id":%(id)j,"url":%(url)j,"http_headers":%(http_headers)j,"duration":%(duration)j}"#
     arguments += [
       "--format", playbackFormatSelector,
-      "--print", #"{"url":%(url)j,"http_headers":%(http_headers)j}"#,
+      "--print", printTemplate,
       "--", url.absoluteString,
     ]
     return arguments
   }
 
-  static func parsePlaybackStream(_ output: String) throws -> PlaybackStream {
+  static func parsePlaybackStream(
+    _ output: String,
+    expectedVideoID: String? = nil
+  ) throws -> PlaybackStream {
     let lines =
       output
       .split(whereSeparator: \Character.isNewline)
@@ -546,6 +597,7 @@ final class YTDLPService {
     guard lines.count == 1,
       let data = lines[0].data(using: .utf8),
       let streamOutput = try? JSONDecoder().decode(PlaybackStreamOutput.self, from: data),
+      expectedVideoID == nil || streamOutput.id == expectedVideoID,
       let components = URLComponents(string: streamOutput.url),
       components.scheme?.lowercased() == "https",
       let host = components.host?.lowercased(),
@@ -570,7 +622,20 @@ final class YTDLPService {
     else {
       throw YTDLPError.noPlayableStream
     }
-    return PlaybackStream(audioURL: url, userAgent: userAgent)
+    let excludedSegments =
+      streamOutput.sponsorBlockChapters?
+      .compactMap { chapter -> PlaybackSegment? in
+        guard chapter.category == "music_offtopic", chapter.type == "skip",
+          let startTime = chapter.startTime, let endTime = chapter.endTime
+        else {
+          return nil
+        }
+        return PlaybackSegment(startTime: startTime, endTime: endTime)
+      } ?? []
+    let timeline = streamOutput.duration.flatMap {
+      PlaybackTimeline(sourceDuration: $0, excludedSegments: excludedSegments)
+    }
+    return PlaybackStream(audioURL: url, userAgent: userAgent, timeline: timeline)
   }
 
   private static func isAllowedPlaybackHost(_ host: String) -> Bool {
@@ -667,6 +732,16 @@ final class YTDLPService {
       return true
     }
     return false
+  }
+
+  private static func isSponsorBlockFailure(_ error: Error) -> Bool {
+    guard let error = error as? YTDLPError,
+      case .commandFailed(let message) = error
+    else {
+      return false
+    }
+    let normalized = message.lowercased()
+    return normalized.contains("sponsorblock") || normalized.contains("preprocessing")
   }
 }
 

@@ -24,7 +24,7 @@ struct YTMusicApp: App {
     .defaultSize(width: 1180, height: 760)
     .commands {
       CommandMenu("Playback") {
-        Button(model.player.isPlaying ? "Pause" : "Play") {
+        Button(model.player.isPlaybackRequested ? "Pause" : "Play") {
           model.player.togglePlayback()
         }
         .disabled(model.player.currentTrack == nil)

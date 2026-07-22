@@ -88,11 +88,11 @@ struct PlayerBar: View {
             ZStack {
               Circle().fill(.primary)
               Image(
-                systemName: model.player.isPlaying || model.player.isBuffering
+                systemName: model.player.isPlaybackRequested
                   ? "pause.fill" : "play.fill"
               )
               .foregroundStyle(.background)
-              .offset(x: model.player.isPlaying || model.player.isBuffering ? 0 : 1)
+              .offset(x: model.player.isPlaybackRequested ? 0 : 1)
             }
             .frame(width: 38, height: 38)
           }

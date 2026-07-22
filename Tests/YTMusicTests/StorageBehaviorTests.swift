@@ -130,6 +130,81 @@ final class StorageBehaviorTests: XCTestCase {
     player.shutdown()
   }
 
+  func testStreamStopsAtResolvedDurationBeforeAssetReportedEnd() async throws {
+    let audioURL = cacheRoot.appendingPathComponent("three-second-tone.wav")
+    try FileManager.default.createDirectory(
+      at: cacheRoot,
+      withIntermediateDirectories: true
+    )
+    try Self.writeShortTone(to: audioURL, duration: 3)
+    let timeline = try XCTUnwrap(
+      PlaybackTimeline(
+        sourceDuration: 0.25,
+        excludedSegments: []
+      ))
+    let stream = PlaybackStream(audioURL: audioURL, userAgent: nil, timeline: timeline)
+    let metadata = SearchResult(
+      id: "stream-end",
+      title: "Stream End",
+      artist: "Test",
+      duration: 3,
+      webpageURLString: "https://www.youtube.com/watch?v=stream-end",
+      thumbnailURLString: nil
+    )
+    let ended = expectation(description: "stream stops at the resolved duration")
+    let player = PlayerStore()
+    player.onTrackEnded = { _ in ended.fulfill() }
+
+    player.play(stream: metadata, resolvedStream: stream)
+
+    XCTAssertEqual(player.duration, 0.25, accuracy: 0.001)
+    await fulfillment(of: [ended], timeout: 2)
+    XCTAssertNil(player.currentTrack)
+    player.shutdown()
+  }
+
+  func testStreamSkipsLeadingInternalAndTrailingNonMusicSections() async throws {
+    let audioURL = cacheRoot.appendingPathComponent("sectioned-tone.wav")
+    try FileManager.default.createDirectory(
+      at: cacheRoot,
+      withIntermediateDirectories: true
+    )
+    try Self.writeShortTone(to: audioURL, duration: 3)
+    let timeline = try XCTUnwrap(
+      PlaybackTimeline(
+        sourceDuration: 3,
+        excludedSegments: [
+          PlaybackSegment(startTime: 0, endTime: 0.25),
+          PlaybackSegment(startTime: 0.5, endTime: 2.5),
+          PlaybackSegment(startTime: 2.75, endTime: 3),
+        ]
+      ))
+    let stream = PlaybackStream(audioURL: audioURL, userAgent: nil, timeline: timeline)
+    let metadata = SearchResult(
+      id: "sectioned-stream",
+      title: "Sectioned Stream",
+      artist: "Test",
+      duration: 3,
+      webpageURLString: "https://www.youtube.com/watch?v=sectioned-stream",
+      thumbnailURLString: nil
+    )
+    let ended = expectation(description: "stream skips every non-music section")
+    let player = PlayerStore()
+    player.onTrackEnded = { _ in ended.fulfill() }
+
+    player.play(stream: metadata, resolvedStream: stream)
+
+    XCTAssertEqual(player.duration, 0.5, accuracy: 0.001)
+    XCTAssertTrue(player.isPlaybackRequested)
+    player.togglePlayback()
+    XCTAssertFalse(player.isPlaybackRequested)
+    player.togglePlayback()
+    XCTAssertTrue(player.isPlaybackRequested)
+    await fulfillment(of: [ended], timeout: 2)
+    XCTAssertNil(player.currentTrack)
+    player.shutdown()
+  }
+
   func testTamperedLibraryPathCannotDeleteFileOutsideManagedFolder() throws {
     let store = LibraryStore(rootOverride: testRoot, cacheOverride: cacheRoot)
     let outsideFile = testRoot.deletingLastPathComponent().appendingPathComponent("important.txt")
@@ -444,12 +519,12 @@ final class StorageBehaviorTests: XCTestCase {
     )
   }
 
-  private static func writeShortTone(to url: URL) throws {
+  private static func writeShortTone(to url: URL, duration: Double = 0.2) throws {
     let sampleRate = 44_100.0
     guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1),
       let buffer = AVAudioPCMBuffer(
         pcmFormat: format,
-        frameCapacity: AVAudioFrameCount(sampleRate * 0.2)
+        frameCapacity: AVAudioFrameCount(sampleRate * duration)
       ),
       let samples = buffer.floatChannelData?[0]
     else {

@@ -4,7 +4,7 @@ YTMusic is a native SwiftUI music app that searches YouTube through `yt-dlp`, st
 
 Its storage rule is deliberate:
 
-- **Play Once** resolves a stereo AAC source and streams it directly through AVPlayer. It does not create an app-managed audio file or wait for the whole song to download.
+- **Play Once** resolves a stereo AAC source and streams it directly through AVPlayer. Playback is capped at yt-dlp's extracted media duration so a bad remote AVFoundation timeline cannot add silence after the song. When validated `music_offtopic` markers are available, marked non-song sections are skipped; marker lookup failure falls back to the complete source. Play Once does not create an app-managed audio file or wait for the whole song to download.
 - **Download** is the only action that keeps an audio file. Kept songs appear in the offline Library.
 - **Playlists store URLs only.** Each entry contains a YouTube URL plus lightweight display metadata. Links can be added while metadata lookup is unavailable. Playback uses an existing Library copy when available; otherwise it streams the song without saving it.
 - **Autoplay prepares the handoff without repeats.** While a song is playing, YTMusic chooses an unheard radio recommendation and resolves its transient stream in the background. Listening history stays in memory for the current app session and recognizes common YouTube labels such as “Official Audio,” while duration and version labels keep distinct recordings separate. Playlist order takes priority, and radio continues after the final playlist song when Autoplay is on.
@@ -60,4 +60,4 @@ Use YTMusic only for media you own or are authorized to download, such as your o
 - App-controlled staging and path validation before every import
 - Atomic JSON persistence with backups, recovery, and rollback for kept tracks and playlist references
 - `AVPlayer` playback with deterministic cleanup callbacks and a cancellable prepared-next pipeline
-- Unit coverage for output parsing, stream URL validation, recommendation parsing/ranking, local feedback, persistent Library imports, URL-only playlists, and temporary-file cleanup
+- Unit coverage for output parsing, stream URL and timeline validation, early playback completion, recommendation parsing/ranking, local feedback, persistent Library imports, URL-only playlists, and temporary-file cleanup

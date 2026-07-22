@@ -16,15 +16,15 @@ struct ToolchainStatus: Equatable, Sendable {
 enum ExecutableResolver {
   static func detect() -> ToolchainStatus {
     let defaults = UserDefaults.standard
-    let customDownloader = defaults.string(forKey: "downloaderPath")
-    let customFFmpeg = defaults.string(forKey: "ffmpegPath")
+    let customDownloader = executableURL(forCustomPath: defaults.string(forKey: "downloaderPath"))
+    let customFFmpeg = executableURL(forCustomPath: defaults.string(forKey: "ffmpegPath"))
 
     let downloader = firstExecutable(
-      customDownloader.map(URL.init(fileURLWithPath:)),
+      customDownloader,
       named: ["yt-dlp"]
     )
     let ffmpeg = firstExecutable(
-      customFFmpeg.map(URL.init(fileURLWithPath:)),
+      customFFmpeg,
       named: ["ffmpeg"]
     )
     let deno = firstExecutable(nil, named: ["deno"])
@@ -38,9 +38,17 @@ enum ExecutableResolver {
     )
   }
 
+  static func executableURL(forCustomPath path: String?) -> URL? {
+    guard let path = path?.trimmingCharacters(in: .whitespacesAndNewlines), !path.isEmpty
+    else {
+      return nil
+    }
+    let url = URL(fileURLWithPath: path).standardizedFileURL
+    return isExecutableRegularFile(url) ? url : nil
+  }
+
   private static func firstExecutable(_ preferred: URL?, named names: [String]) -> URL? {
-    let fileManager = FileManager.default
-    if let preferred, fileManager.isExecutableFile(atPath: preferred.path) {
+    if let preferred, isExecutableRegularFile(preferred) {
       return preferred
     }
 
@@ -60,11 +68,20 @@ enum ExecutableResolver {
     for directory in directories {
       for name in names {
         let candidate = directory.appendingPathComponent(name)
-        if fileManager.isExecutableFile(atPath: candidate.path) {
+        if isExecutableRegularFile(candidate) {
           return candidate.standardizedFileURL
         }
       }
     }
     return nil
+  }
+
+  private static func isExecutableRegularFile(_ url: URL) -> Bool {
+    guard FileManager.default.isExecutableFile(atPath: url.path),
+      let values = try? url.resolvingSymlinksInPath().resourceValues(forKeys: [.isRegularFileKey])
+    else {
+      return false
+    }
+    return values.isRegularFile == true
   }
 }

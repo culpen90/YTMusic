@@ -119,6 +119,63 @@ final class YTDLPProxyRecoveryTests: XCTestCase {
     assertSingleDirectRetry(runner.recordedArguments)
   }
 
+  func testSponsorBlockFailureRetriesPlaybackWithoutMusicSections() async throws {
+    let runner = ProxyScriptedRunner([
+      .result(
+        CommandResult(
+          exitCode: 1,
+          stdout: "",
+          stderr: "ERROR: Preprocessing: SponsorBlock API unavailable"
+        )),
+      .result(
+        CommandResult(
+          exitCode: 0,
+          stdout:
+            #"{"id":"nUsrYVxrDwI","url":"https://rr1.googlevideo.com/audio.m4a","http_headers":{},"duration":421}"#,
+          stderr: ""
+        )),
+    ])
+    let item = SearchResult(
+      id: "nUsrYVxrDwI",
+      title: "Choosin' Texas",
+      artist: "Ella Langley",
+      duration: 422,
+      webpageURLString: "https://www.youtube.com/watch?v=nUsrYVxrDwI",
+      thumbnailURLString: nil
+    )
+
+    let stream = try await makeService(runner: runner).resolvePlaybackStream(for: item)
+
+    XCTAssertEqual(stream.timeline?.duration, 421)
+    XCTAssertEqual(runner.recordedArguments.count, 2)
+    XCTAssertTrue(runner.recordedArguments[0].contains("--sponsorblock-mark"))
+    XCTAssertFalse(runner.recordedArguments[1].contains("--sponsorblock-mark"))
+    XCTAssertFalse(runner.recordedArguments[1].contains { $0.contains("sponsorblock_chapters") })
+  }
+
+  func testCancellationNeverRetriesPlaybackWithoutMusicSections() async {
+    let runner = ProxyScriptedRunner([.cancellation])
+    let item = SearchResult(
+      id: "nUsrYVxrDwI",
+      title: "Choosin' Texas",
+      artist: "Ella Langley",
+      duration: 422,
+      webpageURLString: "https://www.youtube.com/watch?v=nUsrYVxrDwI",
+      thumbnailURLString: nil
+    )
+
+    do {
+      _ = try await makeService(runner: runner).resolvePlaybackStream(for: item)
+      XCTFail("Expected cancellation")
+    } catch is CancellationError {
+      // Cancellation must not launch the plain-stream fallback.
+    } catch {
+      XCTFail("Unexpected error: \(error)")
+    }
+
+    XCTAssertEqual(runner.recordedArguments.count, 1)
+  }
+
   private static let refusedLoopbackProxyResult = CommandResult(
     exitCode: 1,
     stdout: "",
@@ -158,6 +215,7 @@ private final class ProxyScriptedRunner: YTDLPCommandRunning, @unchecked Sendabl
   enum Response {
     case result(CommandResult)
     case successfulDownload(id: String)
+    case cancellation
   }
 
   private let lock = NSLock()
@@ -198,6 +256,8 @@ private final class ProxyScriptedRunner: YTDLPCommandRunning, @unchecked Sendabl
         .stdout
       )
       return CommandResult(exitCode: 0, stdout: "", stderr: "")
+    case .cancellation:
+      throw CancellationError()
     }
   }
 
