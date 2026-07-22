@@ -69,7 +69,7 @@ struct PlaylistView: View {
           .font(.caption.bold())
           .foregroundStyle(.purple)
         Text(
-          "\(playlist.items.count) \(playlist.items.count == 1 ? "song" : "songs") • Downloaded songs play locally; all others use self-cleaning temporary audio."
+          "\(playlist.items.count) \(playlist.items.count == 1 ? "song" : "songs") • Downloaded songs play locally; all others stream without being saved."
         )
         .font(.caption)
         .foregroundStyle(.secondary)
@@ -117,8 +117,8 @@ private struct PlaylistItemRow: View {
             Label("Local", systemImage: "checkmark.circle.fill")
               .foregroundStyle(.green)
           } else {
-            Label("Temporary", systemImage: "clock.arrow.circlepath")
-              .foregroundStyle(.purple)
+            Label("Stream", systemImage: "dot.radiowaves.left.and.right")
+              .foregroundStyle(.blue)
           }
         }
         .font(.caption)

@@ -5,8 +5,9 @@ import Observation
 @MainActor
 @Observable
 final class PlayerStore {
-  private(set) var currentTrack: Track?
+  private(set) var currentTrack: PlaybackTrack?
   private(set) var isPlaying = false
+  private(set) var isBuffering = false
   private(set) var currentTime: Double = 0
   private(set) var duration: Double = 0
   var volume: Double = 0.85 {
@@ -15,16 +16,30 @@ final class PlayerStore {
   var errorMessage: String?
 
   var onTemporaryTrackFinished: ((Track) -> Void)?
-  var onTrackEnded: ((Track) -> Void)?
+  var onTrackEnded: ((PlaybackTrack) -> Void)?
   var onTrackStarted: ((Track) -> Void)?
 
   private let player = AVPlayer()
   private var timeObserver: Any?
   private var endObserver: NSObjectProtocol?
   private var failureObserver: NSObjectProtocol?
+  private var itemStatusObservation: NSKeyValueObservation?
+  private var timeControlStatusObservation: NSKeyValueObservation?
 
   init() {
+    player.automaticallyWaitsToMinimizeStalling = false
     player.volume = Float(volume)
+    timeControlStatusObservation = player.observe(
+      \.timeControlStatus,
+      options: [.initial, .new]
+    ) { [weak self] player, _ in
+      Task { @MainActor in
+        guard let self else { return }
+        self.isPlaying = self.currentTrack != nil && player.timeControlStatus == .playing
+        self.isBuffering =
+          self.currentTrack != nil && player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+      }
+    }
     timeObserver = player.addPeriodicTimeObserver(
       forInterval: CMTime(seconds: 0.25, preferredTimescale: 600),
       queue: .main
@@ -70,16 +85,26 @@ final class PlayerStore {
           return
         }
         self.errorMessage = failureDescription ?? "The audio file could not be played."
-        self.finishCurrentTrack(naturalEnd: true)
+        self.finishCurrentTrack(naturalEnd: false)
       }
     }
   }
 
   func play(_ track: Track) {
-    if currentTrack?.id != track.id || currentTrack?.localFilePath != track.localFilePath {
+    play(PlaybackTrack(local: track))
+  }
+
+  func play(stream metadata: SearchResult, resolvedStream: PlaybackStream) {
+    play(PlaybackTrack(stream: metadata, resolvedStream: resolvedStream))
+  }
+
+  private func play(_ track: PlaybackTrack) {
+    if currentTrack?.id != track.id || currentTrack?.audioURL != track.audioURL {
       finishCurrentTrack(naturalEnd: false)
     }
-    guard FileManager.default.fileExists(atPath: track.audioURL.path) else {
+    if let localTrack = track.localTrack,
+      !FileManager.default.fileExists(atPath: localTrack.audioURL.path)
+    {
       errorMessage = "The audio file is no longer available."
       return
     }
@@ -87,20 +112,38 @@ final class PlayerStore {
     currentTime = 0
     duration = track.duration ?? 0
     errorMessage = nil
-    player.replaceCurrentItem(with: AVPlayerItem(url: track.audioURL))
+    let item: AVPlayerItem
+    if let stream = track.resolvedStream {
+      let options: [String: Any]? = stream.userAgent.map {
+        [AVURLAssetHTTPUserAgentKey: $0]
+      }
+      item = AVPlayerItem(asset: AVURLAsset(url: stream.audioURL, options: options))
+    } else {
+      item = AVPlayerItem(url: track.audioURL)
+    }
+    itemStatusObservation?.invalidate()
+    itemStatusObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
+      guard item.status == .failed else { return }
+      let failureDescription = item.error?.localizedDescription
+      Task { @MainActor in
+        guard let self, self.player.currentItem === item else { return }
+        self.errorMessage = failureDescription ?? "The audio stream could not be played."
+        self.finishCurrentTrack(naturalEnd: false)
+      }
+    }
+    player.replaceCurrentItem(with: item)
     player.play()
-    isPlaying = true
-    onTrackStarted?(track)
+    if let localTrack = track.localTrack {
+      onTrackStarted?(localTrack)
+    }
   }
 
   func togglePlayback() {
     guard currentTrack != nil else { return }
-    if isPlaying {
+    if isPlaying || isBuffering {
       player.pause()
-      isPlaying = false
     } else {
       player.play()
-      isPlaying = true
     }
   }
 
@@ -116,9 +159,8 @@ final class PlayerStore {
       return
     }
     seek(to: 0)
-    if !isPlaying {
+    if !isPlaying && !isBuffering {
       player.play()
-      isPlaying = true
     }
   }
 
@@ -140,18 +182,25 @@ final class PlayerStore {
       NotificationCenter.default.removeObserver(failureObserver)
       self.failureObserver = nil
     }
+    itemStatusObservation?.invalidate()
+    itemStatusObservation = nil
+    timeControlStatusObservation?.invalidate()
+    timeControlStatusObservation = nil
   }
 
   private func finishCurrentTrack(naturalEnd: Bool) {
     guard let oldTrack = currentTrack else { return }
     player.pause()
+    itemStatusObservation?.invalidate()
+    itemStatusObservation = nil
     player.replaceCurrentItem(with: nil)
     currentTrack = nil
     isPlaying = false
+    isBuffering = false
     currentTime = 0
     duration = 0
-    if oldTrack.storage == .temporary {
-      onTemporaryTrackFinished?(oldTrack)
+    if let localTrack = oldTrack.localTrack, localTrack.storage == .temporary {
+      onTemporaryTrackFinished?(localTrack)
     }
     if naturalEnd {
       onTrackEnded?(oldTrack)

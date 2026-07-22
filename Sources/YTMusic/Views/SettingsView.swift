@@ -23,7 +23,7 @@ struct SettingsView: View {
 
   private var general: some View {
     Form {
-      Section("Audio Quality") {
+      Section("Downloaded Audio Format") {
         Picker("Format", selection: $audioFormat) {
           ForEach(AudioFormat.allCases) { format in
             Text(format.title).tag(format.rawValue)
@@ -34,12 +34,15 @@ struct SettingsView: View {
             .font(.caption)
             .foregroundStyle(.secondary)
         }
+        Text("Play Once streams a stereo AAC source directly for faster startup.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
       }
 
       Section("Playback Storage") {
         Label(
-          "Play Once uses the temporary cache and deletes the entire song folder when playback ends or is skipped.",
-          systemImage: "trash.circle")
+          "Play Once streams audio without creating an app-managed song file.",
+          systemImage: "dot.radiowaves.left.and.right")
         Label(
           "Download is the only action that keeps audio in the Library folder.",
           systemImage: "arrow.down.circle")
@@ -132,13 +135,15 @@ struct SettingsView: View {
         }
       }
 
-      Section("Temporary Playback") {
+      Section("Transient Data") {
         Text(
-          "Temporary song folders are removed after playback and swept again every time the app launches or quits."
+          "Play Once does not save audio. Incomplete download staging is swept every time the app launches or quits."
         )
         .foregroundStyle(.secondary)
         Button("Clean Temporary Files Now") {
-          model.player.stopForReplacement()
+          if model.player.currentTrack?.localTrack?.storage == .temporary {
+            model.player.stopForReplacement()
+          }
           model.library.cleanupAllTemporaryFiles()
         }
         .disabled(model.downloads.activeCount > 0)

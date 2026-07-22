@@ -29,7 +29,9 @@ final class AppModel {
 
   private var playlistSession: PlaylistSession?
   private var playRequestToken = UUID()
-  private var pendingPlaybackJobID: UUID?
+  private var playbackTasks: [UUID: Task<Void, Never>] = [:]
+  private var activePlaybackTaskID: UUID?
+  private var isShuttingDown = false
 
   var hasActivePlaylistSession: Bool { playlistSession != nil }
 
@@ -72,6 +74,7 @@ final class AppModel {
   }
 
   func playLibraryTrack(_ track: Track) {
+    guard !isShuttingDown else { return }
     cancelPendingPlayback()
     playlistSession = nil
     playbackMessage = nil
@@ -87,6 +90,7 @@ final class AppModel {
   }
 
   func next() {
+    guard !isShuttingDown else { return }
     cancelPendingPlayback()
     guard playlistSession != nil else {
       player.stopForReplacement()
@@ -99,6 +103,7 @@ final class AppModel {
   }
 
   func previous() {
+    guard !isShuttingDown else { return }
     guard var session = playlistSession else {
       player.restart()
       return
@@ -115,8 +120,17 @@ final class AppModel {
   }
 
   func shutdown() async {
+    isShuttingDown = true
     cancelPendingPlayback()
     player.shutdown()
+    let tasksToFinish = Array(playbackTasks.values)
+    for task in tasksToFinish {
+      task.cancel()
+    }
+    for task in tasksToFinish {
+      await task.value
+    }
+    self.playbackTasks.removeAll()
     await downloads.shutdown()
     await search.shutdown()
     await toolchain.shutdown()
@@ -124,7 +138,8 @@ final class AppModel {
   }
 
   private func beginPlayback(of item: SearchResult, preservePlaylistSession: Bool = false) {
-    cancelPendingPlayback()
+    guard !isShuttingDown else { return }
+    let previousPlaybackTask = cancelPendingPlayback()
     if !preservePlaylistSession { playlistSession = nil }
     player.stopForReplacement()
     player.errorMessage = nil
@@ -139,27 +154,36 @@ final class AppModel {
     }
 
     isPreparingPlayback = true
-    pendingPlaybackJobID = downloads.enqueue(item, intent: .playOnce) { [weak self] result in
-      guard let self else { return }
-      switch result {
-      case .success(let track):
-        guard self.playRequestToken == token else {
-          self.library.deleteTemporaryTrack(track)
-          return
-        }
-        self.pendingPlaybackJobID = nil
-        self.isPreparingPlayback = false
-        self.player.play(track)
-      case .failure(let error):
+    let toolchainStatus = toolchain.status
+    let taskID = UUID()
+    let playbackTask = Task { [weak self] in
+      if let previousPlaybackTask {
+        await previousPlaybackTask.value
+      }
+      do {
+        try Task.checkCancellation()
+        let stream = try await YTDLPService(toolchain: toolchainStatus)
+          .resolvePlaybackStream(for: item)
+        try Task.checkCancellation()
+        guard let self else { return }
+        self.finishPlaybackTask(taskID)
         guard self.playRequestToken == token else { return }
-        self.pendingPlaybackJobID = nil
+        self.isPreparingPlayback = false
+        self.player.play(stream: item, resolvedStream: stream)
+      } catch {
+        guard let self else { return }
+        self.finishPlaybackTask(taskID)
+        guard self.playRequestToken == token else { return }
         self.isPreparingPlayback = false
         self.playbackMessage = error.localizedDescription
       }
     }
+    playbackTasks[taskID] = playbackTask
+    activePlaybackTaskID = taskID
   }
 
   private func advancePlaylist() {
+    guard !isShuttingDown else { return }
     guard var session = playlistSession else {
       playlistSession = nil
       return
@@ -174,12 +198,19 @@ final class AppModel {
     beginPlayback(of: session.items[session.index], preservePlaylistSession: true)
   }
 
-  private func cancelPendingPlayback() {
+  @discardableResult
+  private func cancelPendingPlayback() -> Task<Void, Never>? {
     playRequestToken = UUID()
-    if let pendingPlaybackJobID {
-      self.pendingPlaybackJobID = nil
-      downloads.cancel(pendingPlaybackJobID)
-    }
+    let playbackTask = activePlaybackTaskID.flatMap { playbackTasks[$0] }
+    playbackTask?.cancel()
     isPreparingPlayback = false
+    return playbackTask
+  }
+
+  private func finishPlaybackTask(_ taskID: UUID) {
+    playbackTasks.removeValue(forKey: taskID)
+    if activePlaybackTaskID == taskID {
+      activePlaybackTaskID = nil
+    }
   }
 }

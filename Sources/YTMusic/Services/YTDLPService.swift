@@ -1,16 +1,20 @@
 import Foundation
 
 enum YTDLPError: LocalizedError {
+  case downloaderMissing
   case toolsMissing
   case invalidYouTubeURL
   case emptyQuery
   case commandFailed(String)
   case invalidResponse
   case missingOutput
+  case noPlayableStream
   case unsafeOutputPath
 
   var errorDescription: String? {
     switch self {
+    case .downloaderMissing:
+      "yt-dlp is required for playback. Open Settings to configure it."
     case .toolsMissing:
       "yt-dlp and FFmpeg are required. Open Settings to configure them."
     case .invalidYouTubeURL:
@@ -23,6 +27,8 @@ enum YTDLPError: LocalizedError {
       "The downloader returned metadata that could not be read."
     case .missingOutput:
       "The download finished without reporting an audio file."
+    case .noPlayableStream:
+      "A compatible audio stream could not be prepared for playback."
     case .unsafeOutputPath:
       "The downloader reported a file outside the temporary folder."
     }
@@ -35,7 +41,24 @@ struct DownloadArtifact {
   let stagingDirectory: URL
 }
 
+private struct PlaybackStreamOutput: Decodable {
+  let url: String
+  let httpHeaders: [String: String]?
+
+  private enum CodingKeys: String, CodingKey {
+    case url
+    case httpHeaders = "http_headers"
+  }
+}
+
 final class YTDLPService {
+  static let playbackFormatSelector = [
+    "bestaudio[ext=m4a][acodec^=mp4a][audio_channels<=2][protocol=https]",
+    "bestaudio[acodec^=mp4a][audio_channels<=2][protocol^=m3u8]",
+    "best[ext=mp4][acodec^=mp4a][audio_channels<=2][protocol=https]",
+    "best[acodec^=mp4a][audio_channels<=2][protocol^=m3u8]",
+  ].joined(separator: "/")
+
   private let toolchain: ToolchainStatus
   private let runner: SubprocessRunner
   private let decoder = JSONDecoder()
@@ -90,7 +113,6 @@ final class YTDLPService {
     let response = try await runJSON(
       [
         "--ignore-config",
-        "--no-cache-dir",
         "--flat-playlist",
         "--skip-download",
         "--dump-single-json",
@@ -110,7 +132,6 @@ final class YTDLPService {
     let response = try await runJSON(
       [
         "--ignore-config",
-        "--no-cache-dir",
         "--no-playlist",
         "--skip-download",
         "--dump-single-json",
@@ -122,6 +143,18 @@ final class YTDLPService {
       throw YTDLPError.invalidResponse
     }
     return metadata
+  }
+
+  func resolvePlaybackStream(for item: SearchResult) async throws -> PlaybackStream {
+    guard toolchain.downloaderURL != nil else { throw YTDLPError.downloaderMissing }
+    guard let url = item.webpageURL, Self.isYouTubeURL(url) else {
+      throw YTDLPError.invalidYouTubeURL
+    }
+
+    let response = try await runJSON(
+      Self.playbackStreamArguments(for: url, denoURL: toolchain.denoURL))
+    try Task.checkCancellation()
+    return try Self.parsePlaybackStream(response)
   }
 
   func download(
@@ -251,6 +284,65 @@ final class YTDLPService {
       return parts[1]
     }
     return nil
+  }
+
+  static func playbackStreamArguments(for url: URL, denoURL: URL?) -> [String] {
+    var arguments = [
+      "--ignore-config",
+      "--no-playlist",
+      "--skip-download",
+      "--no-warnings",
+    ]
+    if let denoURL {
+      arguments += ["--js-runtimes", "deno:\(denoURL.path)"]
+    }
+    arguments += [
+      "--format", playbackFormatSelector,
+      "--print", #"{"url":%(url)j,"http_headers":%(http_headers)j}"#,
+      "--", url.absoluteString,
+    ]
+    return arguments
+  }
+
+  static func parsePlaybackStream(_ output: String) throws -> PlaybackStream {
+    let lines =
+      output
+      .split(whereSeparator: \Character.isNewline)
+      .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+      .filter { !$0.isEmpty }
+    guard lines.count == 1,
+      let data = lines[0].data(using: .utf8),
+      let streamOutput = try? JSONDecoder().decode(PlaybackStreamOutput.self, from: data),
+      let components = URLComponents(string: streamOutput.url),
+      components.scheme?.lowercased() == "https",
+      let host = components.host?.lowercased(),
+      isAllowedPlaybackHost(host),
+      components.port == nil || components.port == 443,
+      components.user == nil,
+      components.password == nil,
+      components.fragment == nil,
+      let url = components.url
+    else {
+      throw YTDLPError.noPlayableStream
+    }
+
+    let userAgent = streamOutput.httpHeaders?.first {
+      $0.key.caseInsensitiveCompare("User-Agent") == .orderedSame
+    }?.value
+    guard
+      userAgent.map({ value in
+        value.count <= 1_024
+          && !value.unicodeScalars.contains(where: { $0.value == 0x0A || $0.value == 0x0D })
+      }) ?? true
+    else {
+      throw YTDLPError.noPlayableStream
+    }
+    return PlaybackStream(audioURL: url, userAgent: userAgent)
+  }
+
+  private static func isAllowedPlaybackHost(_ host: String) -> Bool {
+    host == "googlevideo.com" || host.hasSuffix(".googlevideo.com")
+      || host == "youtube.com" || host.hasSuffix(".youtube.com")
   }
 
   private var javascriptRuntimeArguments: [String] {

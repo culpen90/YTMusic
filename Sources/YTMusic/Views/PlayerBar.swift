@@ -17,11 +17,18 @@ struct PlayerBar: View {
             .foregroundStyle(.secondary)
             .lineLimit(1)
           Label(
-            track.storage == .temporary ? "Deletes after playback" : "Saved in Library",
-            systemImage: track.storage == .temporary ? "trash" : "checkmark.circle.fill"
+            track.isStreaming
+              ? (model.player.isBuffering ? "Buffering stream…" : "Streaming • Not saved")
+              : (track.localTrack?.storage == .temporary
+                ? "Deletes after playback" : "Saved in Library"),
+            systemImage: track.isStreaming
+              ? (model.player.isBuffering ? "hourglass" : "dot.radiowaves.left.and.right")
+              : (track.localTrack?.storage == .temporary ? "trash" : "checkmark.circle.fill")
           )
           .font(.caption2.bold())
-          .foregroundStyle(track.storage == .temporary ? .purple : .green)
+          .foregroundStyle(
+            track.isStreaming ? .blue : (track.localTrack?.storage == .temporary ? .purple : .green)
+          )
         }
         .frame(width: 210, alignment: .leading)
       } else if model.isPreparingPlayback {
@@ -31,8 +38,8 @@ struct PlayerBar: View {
         }
         .frame(width: 58, height: 58)
         VStack(alignment: .leading, spacing: 4) {
-          Text("Preparing temporary audio…").font(.headline)
-          Text("The file will be removed when playback finishes.")
+          Text("Starting stream…").font(.headline)
+          Text("Resolving audio without downloading the whole song.")
             .font(.caption)
             .foregroundStyle(.secondary)
         }
@@ -66,9 +73,12 @@ struct PlayerBar: View {
           } label: {
             ZStack {
               Circle().fill(.primary)
-              Image(systemName: model.player.isPlaying ? "pause.fill" : "play.fill")
-                .foregroundStyle(.background)
-                .offset(x: model.player.isPlaying ? 0 : 1)
+              Image(
+                systemName: model.player.isPlaying || model.player.isBuffering
+                  ? "pause.fill" : "play.fill"
+              )
+              .foregroundStyle(.background)
+              .offset(x: model.player.isPlaying || model.player.isBuffering ? 0 : 1)
             }
             .frame(width: 38, height: 38)
           }

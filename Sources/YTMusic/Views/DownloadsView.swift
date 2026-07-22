@@ -14,9 +14,7 @@ struct DownloadsView: View {
         ContentUnavailableView {
           Label("No Downloads Yet", systemImage: "arrow.down.circle")
         } description: {
-          Text(
-            "Play Once jobs appear here while they prepare. Download jobs remain in your library after completion."
-          )
+          Text("Songs you download for offline listening appear here and remain in your library.")
         } actions: {
           Button("Discover Music") { model.selection = .discover }
             .buttonStyle(.borderedProminent)

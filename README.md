@@ -1,12 +1,12 @@
 # YTMusic for macOS
 
-YTMusic is a native SwiftUI music app that searches YouTube through `yt-dlp`, extracts the best available audio with FFmpeg, and plays it with AVFoundation.
+YTMusic is a native SwiftUI music app that searches YouTube through `yt-dlp`, streams Play Once audio with AVFoundation, and uses FFmpeg for saved downloads.
 
 Its storage rule is deliberate:
 
-- **Play Once** downloads into a per-song cache folder. The complete folder—audio, artwork, and temporary metadata—is deleted when the song ends, when you skip it, on app quit, and again on the next launch.
+- **Play Once** resolves a stereo AAC source and streams it directly through AVPlayer. It does not create an app-managed audio file or wait for the whole song to download.
 - **Download** is the only action that keeps an audio file. Kept songs appear in the offline Library.
-- **Playlists store URLs only.** Each entry contains a YouTube URL plus lightweight display metadata. Links can be added while metadata lookup is unavailable. Playback uses an existing Library copy when available; otherwise it prepares a self-cleaning temporary copy for that song.
+- **Playlists store URLs only.** Each entry contains a YouTube URL plus lightweight display metadata. Links can be added while metadata lookup is unavailable. Playback uses an existing Library copy when available; otherwise it streams the song without saving it.
 
 ## Requirements
 
@@ -35,14 +35,14 @@ open dist/YTMusic.app
 
 ## Audio quality
 
-The default **Best available** mode selects `bestaudio/best` and asks yt-dlp/FFmpeg to preserve the source audio without another lossy encode. This is higher fidelity than converting already-lossy YouTube audio to MP3. ALAC is available when a lossless post-conversion/native container is preferred, but it cannot restore information absent from the source and uses much more disk. M4A and MP3 are available for compatibility.
+The download format setting applies to songs kept in the Library. The default **Best available** mode selects `bestaudio/best` and asks yt-dlp/FFmpeg to preserve the source audio without another lossy encode. ALAC, M4A, and MP3 are available for saved downloads. Play Once instead selects an AVPlayer-compatible stereo AAC stream so playback can begin without a full-file transfer or conversion.
 
 ## Data locations
 
 - Kept audio: `~/Library/Application Support/YTMusic/Media`
 - Kept artwork and library metadata: `~/Library/Application Support/YTMusic`
 - Interrupted or unreferenced Library files preserved for recovery: `~/Library/Application Support/YTMusic/Recovered`
-- Temporary playback and staging: `~/Library/Caches/YTMusic`
+- Interrupted download staging and transient app data: `~/Library/Caches/YTMusic`
 
 Library deletion moves the audio file to the macOS Trash. Playlist deletion removes only the URL list; it never deletes downloaded songs. Remote artwork uses an ephemeral network session rather than a persistent URL cache.
 
@@ -57,4 +57,4 @@ Use YTMusic only for media you own or are authorized to download, such as your o
 - App-controlled staging and path validation before every import
 - Atomic JSON persistence with backups, recovery, and rollback for kept tracks and playlist references
 - `AVPlayer` playback with deterministic cleanup callbacks
-- Unit coverage for output parsing, URL validation, persistent Library imports, URL-only playlists, and Play Once deletion
+- Unit coverage for output parsing, stream URL validation, persistent Library imports, URL-only playlists, and temporary-file cleanup

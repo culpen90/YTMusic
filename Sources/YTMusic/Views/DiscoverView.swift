@@ -32,7 +32,7 @@ struct DiscoverView: View {
       VStack(alignment: .leading, spacing: 5) {
         Text("What do you want to hear?")
           .font(.system(size: 32, weight: .bold, design: .rounded))
-        Text("Search YouTube or paste a link. Play Once cleans itself up; Download keeps a copy.")
+        Text("Search YouTube or paste a link. Play Once streams; Download keeps a copy.")
           .font(.callout)
           .foregroundStyle(.secondary)
       }
@@ -162,7 +162,7 @@ struct SearchResultRow: View {
         Label("Play Once", systemImage: "play.fill")
       }
       .buttonStyle(.borderedProminent)
-      .help("Fetch temporarily, play, then delete the file")
+      .help("Stream without saving an audio file")
     }
     .padding(10)
     .background(
@@ -207,7 +207,7 @@ private struct EmptyDiscoverState: View {
       FeatureCard(
         icon: "play.circle.fill",
         title: "Play Once",
-        detail: "Audio lives in a temporary cache and is erased when you finish or skip it.",
+        detail: "Audio starts as a stream without waiting for the whole song to download.",
         color: .purple
       )
       FeatureCard(

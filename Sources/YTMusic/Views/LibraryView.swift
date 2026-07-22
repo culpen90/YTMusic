@@ -179,7 +179,7 @@ private struct LibraryContextMenu: View {
     }
     Divider()
     Button("Move to Trash", role: .destructive) {
-      if model.player.currentTrack?.localFilePath == track.localFilePath {
+      if model.player.currentTrack?.localTrack?.localFilePath == track.localFilePath {
         model.player.stopForReplacement()
       }
       model.library.deleteFromLibrary(track)

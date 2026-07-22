@@ -27,7 +27,7 @@ struct RootView: View {
           .transition(.move(edge: .bottom).combined(with: .opacity))
       }
     }
-    .animation(.snappy, value: model.player.currentTrack?.localFilePath)
+    .animation(.snappy, value: model.player.currentTrack?.audioURL.absoluteString)
     .sheet(item: $sheet) { destination in
       switch destination {
       case .newPlaylist:
@@ -161,7 +161,7 @@ private struct NewPlaylistSheet: View {
       Text("New Playlist")
         .font(.title2.bold())
       Text(
-        "Playlists save YouTube links only. Audio is fetched temporarily when needed unless a song is already in your library."
+        "Playlists save YouTube links only. Songs stream when needed unless they are already in your library."
       )
       .foregroundStyle(.secondary)
       .fixedSize(horizontal: false, vertical: true)
