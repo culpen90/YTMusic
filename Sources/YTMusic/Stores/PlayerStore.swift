@@ -18,6 +18,8 @@ final class PlayerStore {
   var onTemporaryTrackFinished: ((Track) -> Void)?
   var onTrackEnded: ((PlaybackTrack) -> Void)?
   var onTrackStarted: ((Track) -> Void)?
+  var onPlaybackStarted: ((PlaybackTrack) -> Void)?
+  var onTrackFailed: ((PlaybackTrack) -> Void)?
 
   private let player = AVPlayer()
   private var timeObserver: Any?
@@ -84,8 +86,10 @@ final class PlayerStore {
         else {
           return
         }
+        let failedTrack = self.currentTrack
         self.errorMessage = failureDescription ?? "The audio file could not be played."
         self.finishCurrentTrack(naturalEnd: false)
+        if let failedTrack { self.onTrackFailed?(failedTrack) }
       }
     }
   }
@@ -127,8 +131,10 @@ final class PlayerStore {
       let failureDescription = item.error?.localizedDescription
       Task { @MainActor in
         guard let self, self.player.currentItem === item else { return }
+        let failedTrack = self.currentTrack
         self.errorMessage = failureDescription ?? "The audio stream could not be played."
         self.finishCurrentTrack(naturalEnd: false)
+        if let failedTrack { self.onTrackFailed?(failedTrack) }
       }
     }
     player.replaceCurrentItem(with: item)
@@ -136,6 +142,7 @@ final class PlayerStore {
     if let localTrack = track.localTrack {
       onTrackStarted?(localTrack)
     }
+    onPlaybackStarted?(track)
   }
 
   func togglePlayback() {

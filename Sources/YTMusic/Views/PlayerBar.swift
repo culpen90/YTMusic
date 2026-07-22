@@ -30,7 +30,7 @@ struct PlayerBar: View {
             track.isStreaming ? .blue : (track.localTrack?.storage == .temporary ? .purple : .green)
           )
         }
-        .frame(width: 210, alignment: .leading)
+        .frame(width: 220, alignment: .leading)
       } else if model.isPreparingPlayback {
         ZStack {
           RoundedRectangle(cornerRadius: 9).fill(.quaternary)
@@ -43,7 +43,7 @@ struct PlayerBar: View {
             .font(.caption)
             .foregroundStyle(.secondary)
         }
-        .frame(width: 210, alignment: .leading)
+        .frame(width: 220, alignment: .leading)
       } else if let message = model.playbackMessage ?? model.player.errorMessage {
         Image(systemName: "exclamationmark.triangle.fill")
           .font(.title2)
@@ -53,13 +53,27 @@ struct PlayerBar: View {
           .font(.caption)
           .foregroundStyle(.red)
           .lineLimit(2)
-          .frame(width: 210, alignment: .leading)
+          .frame(width: 220, alignment: .leading)
       }
 
       Spacer(minLength: 8)
 
       VStack(spacing: 7) {
-        HStack(spacing: 22) {
+        HStack(spacing: 18) {
+          Button {
+            model.toggleRating(.disliked)
+          } label: {
+            Image(
+              systemName: model.currentRating == .disliked
+                ? "hand.thumbsdown.fill" : "hand.thumbsdown"
+            )
+            .foregroundStyle(model.currentRating == .disliked ? .red : .secondary)
+          }
+          .buttonStyle(.plain)
+          .disabled(model.player.currentTrack == nil)
+          .help(model.currentRating == .disliked ? "Remove dislike" : "Dislike this song")
+          .accessibilityLabel("Dislike current song")
+
           Button {
             model.previous()
           } label: {
@@ -91,10 +105,21 @@ struct PlayerBar: View {
             Image(systemName: "forward.fill")
           }
           .buttonStyle(.plain)
-          .disabled(
-            model.player.currentTrack == nil && !model.isPreparingPlayback
-              && !model.hasActivePlaylistSession
-          )
+          .disabled(!model.canPlayNext)
+
+          Button {
+            model.toggleRating(.liked)
+          } label: {
+            Image(
+              systemName: model.currentRating == .liked
+                ? "hand.thumbsup.fill" : "hand.thumbsup"
+            )
+            .foregroundStyle(model.currentRating == .liked ? .green : .secondary)
+          }
+          .buttonStyle(.plain)
+          .disabled(model.player.currentTrack == nil)
+          .help(model.currentRating == .liked ? "Remove like" : "Like this song")
+          .accessibilityLabel("Like current song")
         }
 
         HStack(spacing: 8) {
@@ -117,25 +142,62 @@ struct PlayerBar: View {
 
       Spacer(minLength: 8)
 
-      HStack(spacing: 8) {
-        Image(systemName: "speaker.fill")
+      VStack(alignment: .trailing, spacing: 8) {
+        HStack(spacing: 8) {
+          Button {
+            model.toggleAutoplay()
+          } label: {
+            Label("Autoplay", systemImage: "infinity")
+          }
+          .buttonStyle(.bordered)
+          .tint(model.autoplay.isEnabled ? .accentColor : .secondary)
+          .help(model.autoplay.isEnabled ? "Turn Autoplay off" : "Turn Autoplay on")
+
+          if model.autoplay.isPreparing {
+            ProgressView()
+              .controlSize(.small)
+              .help("Preparing the next song")
+          } else if model.autoplay.nextItem != nil {
+            Image(systemName: "checkmark.circle.fill")
+              .foregroundStyle(.green)
+              .help("The next song is ready")
+          }
+        }
+
+        if let nextItem = model.autoplay.nextItem {
+          Text(
+            model.autoplay.isPreparing ? "Preparing: \(nextItem.title)" : "Next: \(nextItem.title)"
+          )
+          .font(.caption2)
           .foregroundStyle(.secondary)
-        Slider(
-          value: Binding(
-            get: { model.player.volume },
-            set: { model.player.volume = $0 }
-          ),
-          in: 0...1
-        )
-        .frame(width: 100)
-        Image(systemName: "speaker.wave.3.fill")
-          .foregroundStyle(.secondary)
+          .lineLimit(1)
+          .help(nextItem.title)
+        } else if model.autoplay.isPreparing {
+          Text("Choosing your next song…")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+
+        HStack(spacing: 8) {
+          Image(systemName: "speaker.fill")
+            .foregroundStyle(.secondary)
+          Slider(
+            value: Binding(
+              get: { model.player.volume },
+              set: { model.player.volume = $0 }
+            ),
+            in: 0...1
+          )
+          .frame(width: 105)
+          Image(systemName: "speaker.wave.3.fill")
+            .foregroundStyle(.secondary)
+        }
       }
-      .frame(width: 155)
+      .frame(width: 220, alignment: .trailing)
     }
     .padding(.horizontal, 18)
     .padding(.vertical, 11)
-    .frame(minHeight: 86)
+    .frame(minHeight: 96)
     .background(.ultraThickMaterial)
   }
 }

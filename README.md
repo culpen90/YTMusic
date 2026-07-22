@@ -7,6 +7,8 @@ Its storage rule is deliberate:
 - **Play Once** resolves a stereo AAC source and streams it directly through AVPlayer. It does not create an app-managed audio file or wait for the whole song to download.
 - **Download** is the only action that keeps an audio file. Kept songs appear in the offline Library.
 - **Playlists store URLs only.** Each entry contains a YouTube URL plus lightweight display metadata. Links can be added while metadata lookup is unavailable. Playback uses an existing Library copy when available; otherwise it streams the song without saving it.
+- **Autoplay prepares the handoff.** While a song is playing, YTMusic chooses a radio recommendation and resolves its transient stream in the background. Playlist order takes priority, and radio continues after the final playlist song when Autoplay is on.
+- **Thumbs tune future choices.** Likes and dislikes are stored locally as lightweight song metadata. Disliked songs are excluded, and feedback about an artist changes how later radio candidates are ranked.
 
 ## Requirements
 
@@ -41,10 +43,11 @@ The download format setting applies to songs kept in the Library. The default **
 
 - Kept audio: `~/Library/Application Support/YTMusic/Media`
 - Kept artwork and library metadata: `~/Library/Application Support/YTMusic`
+- Local thumbs feedback: `~/Library/Application Support/YTMusic/feedback.json`
 - Interrupted or unreferenced Library files preserved for recovery: `~/Library/Application Support/YTMusic/Recovered`
 - Interrupted download staging and transient app data: `~/Library/Caches/YTMusic`
 
-Library deletion moves the audio file to the macOS Trash. Playlist deletion removes only the URL list; it never deletes downloaded songs. Remote artwork uses an ephemeral network session rather than a persistent URL cache.
+Library deletion moves the audio file to the macOS Trash. Playlist deletion removes only the URL list; it never deletes downloaded songs. Autoplay candidates and their expiring stream URLs are never persisted, and preparing the next song creates no audio file. Remote artwork uses an ephemeral network session rather than a persistent URL cache.
 
 ## Responsible use
 
@@ -56,5 +59,5 @@ Use YTMusic only for media you own or are authorized to download, such as your o
 - Shell-free `Foundation.Process` runner with tagged JSON progress, EOF-safe output draining, and cancellable child process groups
 - App-controlled staging and path validation before every import
 - Atomic JSON persistence with backups, recovery, and rollback for kept tracks and playlist references
-- `AVPlayer` playback with deterministic cleanup callbacks
-- Unit coverage for output parsing, stream URL validation, persistent Library imports, URL-only playlists, and temporary-file cleanup
+- `AVPlayer` playback with deterministic cleanup callbacks and a cancellable prepared-next pipeline
+- Unit coverage for output parsing, stream URL validation, recommendation parsing/ranking, local feedback, persistent Library imports, URL-only playlists, and temporary-file cleanup

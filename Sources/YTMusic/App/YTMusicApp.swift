@@ -33,6 +33,22 @@ struct YTMusicApp: App {
           .keyboardShortcut(.leftArrow, modifiers: [.command])
         Button("Next") { model.next() }
           .keyboardShortcut(.rightArrow, modifiers: [.command])
+
+        Divider()
+
+        Button(model.currentRating == .liked ? "Remove Like" : "Like Current Song") {
+          model.toggleRating(.liked)
+        }
+        .disabled(model.player.currentTrack == nil)
+
+        Button(model.currentRating == .disliked ? "Remove Dislike" : "Dislike Current Song") {
+          model.toggleRating(.disliked)
+        }
+        .disabled(model.player.currentTrack == nil)
+
+        Button(model.autoplay.isEnabled ? "Turn Autoplay Off" : "Turn Autoplay On") {
+          model.toggleAutoplay()
+        }
       }
     }
 

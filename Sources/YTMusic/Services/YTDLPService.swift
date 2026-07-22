@@ -4,11 +4,13 @@ enum YTDLPError: LocalizedError {
   case downloaderMissing
   case toolsMissing
   case invalidYouTubeURL
+  case invalidRecommendationSeed
   case emptyQuery
   case commandFailed(String)
   case invalidResponse
   case missingOutput
   case noPlayableStream
+  case noRecommendations
   case unsafeOutputPath
 
   var errorDescription: String? {
@@ -19,6 +21,8 @@ enum YTDLPError: LocalizedError {
       "yt-dlp and FFmpeg are required. Open Settings to configure them."
     case .invalidYouTubeURL:
       "Enter a valid YouTube or youtu.be link."
+    case .invalidRecommendationSeed:
+      "This song cannot be used for autoplay recommendations."
     case .emptyQuery:
       "Enter a song, artist, or YouTube link."
     case .commandFailed(let message):
@@ -29,10 +33,57 @@ enum YTDLPError: LocalizedError {
       "The download finished without reporting an audio file."
     case .noPlayableStream:
       "A compatible audio stream could not be prepared for playback."
+    case .noRecommendations:
+      "No autoplay recommendation is available for this song yet."
     case .unsafeOutputPath:
       "The downloader reported a file outside the temporary folder."
     }
   }
+}
+
+protocol YTDLPCommandRunning {
+  func run(
+    executableURL: URL,
+    arguments: [String],
+    currentDirectoryURL: URL?,
+    environment: [String: String]?,
+    onLine: @escaping @Sendable (String, CommandOutputStream) -> Void
+  ) async throws -> CommandResult
+}
+
+extension SubprocessRunner: YTDLPCommandRunning {}
+
+extension YTDLPCommandRunning {
+  func run(executableURL: URL, arguments: [String]) async throws -> CommandResult {
+    try await run(
+      executableURL: executableURL,
+      arguments: arguments,
+      currentDirectoryURL: nil,
+      environment: nil,
+      onLine: { _, _ in }
+    )
+  }
+
+  func run(
+    executableURL: URL,
+    arguments: [String],
+    currentDirectoryURL: URL?,
+    onLine: @escaping @Sendable (String, CommandOutputStream) -> Void
+  ) async throws -> CommandResult {
+    try await run(
+      executableURL: executableURL,
+      arguments: arguments,
+      currentDirectoryURL: currentDirectoryURL,
+      environment: nil,
+      onLine: onLine
+    )
+  }
+}
+
+enum RecommendationSource: CaseIterable, Equatable {
+  case youtubeMusicRadio
+  case youtubeMix
+  case search
 }
 
 struct DownloadArtifact {
@@ -52,6 +103,9 @@ private struct PlaybackStreamOutput: Decodable {
 }
 
 final class YTDLPService {
+  static let recommendationPrintTemplate =
+    "%(.{id,title,channel,duration,webpage_url})j"
+
   static let playbackFormatSelector = [
     "bestaudio[ext=m4a][acodec^=mp4a][audio_channels<=2][protocol=https]",
     "bestaudio[acodec^=mp4a][audio_channels<=2][protocol^=m3u8]",
@@ -60,10 +114,13 @@ final class YTDLPService {
   ].joined(separator: "/")
 
   private let toolchain: ToolchainStatus
-  private let runner: SubprocessRunner
+  private let runner: any YTDLPCommandRunning
   private let decoder = JSONDecoder()
 
-  init(toolchain: ToolchainStatus, runner: SubprocessRunner = SubprocessRunner()) {
+  init(
+    toolchain: ToolchainStatus,
+    runner: any YTDLPCommandRunning = SubprocessRunner()
+  ) {
     self.toolchain = toolchain
     self.runner = runner
   }
@@ -125,6 +182,46 @@ final class YTDLPService {
       throw YTDLPError.invalidResponse
     }
     return envelope.entries
+  }
+
+  func recommendations(for item: SearchResult, limit: Int = 15) async throws
+    -> [SearchResult]
+  {
+    guard limit > 0 else { return [] }
+    guard toolchain.downloaderURL != nil else { throw YTDLPError.downloaderMissing }
+    guard Self.isValidYouTubeVideoID(item.id) else {
+      throw YTDLPError.invalidRecommendationSeed
+    }
+
+    var lastError: Error?
+    var receivedValidResponse = false
+
+    for source in RecommendationSource.allCases {
+      try Task.checkCancellation()
+      do {
+        let response = try await runJSON(
+          Self.recommendationArguments(
+            for: item,
+            source: source,
+            limit: limit,
+            denoURL: toolchain.denoURL
+          ))
+        try Task.checkCancellation()
+        let candidates = try Self.parseRecommendations(
+          response,
+          seedVideoID: item.id,
+          limit: limit
+        )
+        receivedValidResponse = true
+        if !candidates.isEmpty { return candidates }
+      } catch {
+        if Self.isCancellation(error) { throw error }
+        lastError = error
+      }
+    }
+
+    if receivedValidResponse { throw YTDLPError.noRecommendations }
+    throw lastError ?? YTDLPError.noRecommendations
   }
 
   func probe(url: URL) async throws -> SearchResult {
@@ -284,6 +381,134 @@ final class YTDLPService {
       return parts[1]
     }
     return nil
+  }
+
+  static func isValidYouTubeVideoID(_ value: String) -> Bool {
+    value.utf8.count == 11
+      && value.utf8.allSatisfy { byte in
+        (byte >= 97 && byte <= 122)
+          || (byte >= 65 && byte <= 90)
+          || (byte >= 48 && byte <= 57)
+          || byte == 95
+          || byte == 45
+      }
+  }
+
+  static func canonicalYouTubeURL(forVideoID videoID: String) -> URL? {
+    guard isValidYouTubeVideoID(videoID) else { return nil }
+    var components = URLComponents()
+    components.scheme = "https"
+    components.host = "www.youtube.com"
+    components.path = "/watch"
+    components.queryItems = [URLQueryItem(name: "v", value: videoID)]
+    return components.url
+  }
+
+  static func recommendationArguments(
+    for item: SearchResult,
+    source: RecommendationSource,
+    limit: Int,
+    denoURL: URL?
+  ) throws -> [String] {
+    guard isValidYouTubeVideoID(item.id), limit > 0 else {
+      throw YTDLPError.invalidRecommendationSeed
+    }
+
+    let requestLimit = min(max(limit, 1), 49) + 1
+    var arguments = [
+      "--ignore-config",
+      "--flat-playlist",
+    ]
+    if source != .search { arguments.append("--lazy-playlist") }
+    arguments += [
+      "--skip-download",
+      "--no-warnings",
+      "--playlist-start", "1",
+      "--playlist-end", String(requestLimit),
+    ]
+    if let denoURL {
+      arguments += ["--js-runtimes", "deno:\(denoURL.path)"]
+    }
+    arguments += [
+      "--print", recommendationPrintTemplate,
+      "--", try recommendationInput(for: item, source: source, requestLimit: requestLimit),
+    ]
+    return arguments
+  }
+
+  static func parseRecommendations(
+    _ output: String,
+    seedVideoID: String,
+    limit: Int
+  ) throws -> [SearchResult] {
+    guard isValidYouTubeVideoID(seedVideoID) else {
+      throw YTDLPError.invalidRecommendationSeed
+    }
+    guard limit > 0 else { return [] }
+
+    let lines = output.split(whereSeparator: \Character.isNewline)
+    var seen = Set<String>()
+    var recommendations: [SearchResult] = []
+    recommendations.reserveCapacity(min(limit, lines.count))
+
+    for line in lines {
+      let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !trimmed.isEmpty else { continue }
+      guard let data = trimmed.data(using: .utf8),
+        let decoded = try? JSONDecoder().decode(SearchResult.self, from: data)
+      else {
+        throw YTDLPError.invalidResponse
+      }
+      guard decoded.id != seedVideoID,
+        isValidYouTubeVideoID(decoded.id),
+        seen.insert(decoded.id).inserted,
+        let canonicalURL = canonicalYouTubeURL(forVideoID: decoded.id)
+      else {
+        continue
+      }
+
+      recommendations.append(
+        SearchResult(
+          id: decoded.id,
+          title: decoded.title,
+          artist: decoded.artist,
+          duration: decoded.duration,
+          webpageURLString: canonicalURL.absoluteString,
+          thumbnailURLString: decoded.thumbnailURLString
+        ))
+      if recommendations.count == limit { break }
+    }
+    return recommendations
+  }
+
+  private static func recommendationInput(
+    for item: SearchResult,
+    source: RecommendationSource,
+    requestLimit: Int
+  ) throws -> String {
+    switch source {
+    case .youtubeMusicRadio, .youtubeMix:
+      var components = URLComponents()
+      components.scheme = "https"
+      components.host = source == .youtubeMusicRadio ? "music.youtube.com" : "www.youtube.com"
+      components.path = "/watch"
+      let playlistPrefix = source == .youtubeMusicRadio ? "RDAMVM" : "RD"
+      components.queryItems = [
+        URLQueryItem(name: "v", value: item.id),
+        URLQueryItem(name: "list", value: playlistPrefix + item.id),
+      ]
+      guard let url = components.url else { throw YTDLPError.invalidRecommendationSeed }
+      return url.absoluteString
+    case .search:
+      let artist = item.artist.trimmingCharacters(in: .whitespacesAndNewlines)
+      let title = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
+      let terms = [artist == "Unknown artist" ? nil : artist, title, "similar songs"]
+        .compactMap { $0 }
+        .filter { !$0.isEmpty }
+        .joined(separator: " ")
+      guard !terms.isEmpty else { throw YTDLPError.invalidRecommendationSeed }
+      return "ytsearch\(requestLimit):\(terms)"
+    }
   }
 
   static func playbackStreamArguments(for url: URL, denoURL: URL?) -> [String] {

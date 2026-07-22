@@ -222,6 +222,12 @@ private struct EmptyDiscoverState: View {
         detail: "Playlists retain links and metadata—not media files.",
         color: .pink
       )
+      FeatureCard(
+        icon: "infinity",
+        title: "Prepared Autoplay",
+        detail: "Thumbs shape radio while the next stream gets ready in the background.",
+        color: .green
+      )
     }
   }
 }

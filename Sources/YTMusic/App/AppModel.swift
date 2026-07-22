@@ -18,9 +18,11 @@ final class AppModel {
   let toolchain: ToolchainStore
   let library: LibraryStore
   let playlists: PlaylistStore
+  let feedback: FeedbackStore
   let search: SearchStore
   let downloads: DownloadManager
   let player: PlayerStore
+  let autoplay: AutoplayStore
 
   private struct PlaylistSession {
     let items: [SearchResult]
@@ -31,19 +33,34 @@ final class AppModel {
   private var playRequestToken = UUID()
   private var playbackTasks: [UUID: Task<Void, Never>] = [:]
   private var activePlaybackTaskID: UUID?
+  private var failedPlaybackTrack: PlaybackTrack?
+  private var recentlyPlayedIDs: [String] = []
+  private var nextPreparationBarrier: Task<Void, Never>?
+  private var waitingForPreparedNext = false
+  private var waitingPlaylistItemID: String?
   private var isShuttingDown = false
 
-  var hasActivePlaylistSession: Bool { playlistSession != nil }
+  var canPlayNext: Bool {
+    player.currentTrack != nil || isPreparingPlayback || playlistSession != nil
+      || failedPlaybackTrack != nil || autoplay.preparedPlayback != nil || autoplay.isPreparing
+  }
+  var currentRating: SongRating? {
+    player.currentTrack.flatMap { feedback.rating(for: $0.id) }
+  }
 
   init() {
     let toolchain = ToolchainStore()
     let library = LibraryStore()
+    let feedback = FeedbackStore(rootDirectory: library.rootDirectory)
+    let player = PlayerStore()
     self.toolchain = toolchain
     self.library = library
+    self.feedback = feedback
+    self.player = player
     playlists = PlaylistStore(rootDirectory: library.rootDirectory)
     search = SearchStore(toolchain: toolchain)
     downloads = DownloadManager(toolchain: toolchain, library: library)
-    player = PlayerStore()
+    autoplay = AutoplayStore(feedback: feedback, library: library)
 
     player.onTemporaryTrackFinished = { [weak library] track in
       library?.deleteTemporaryTrack(track)
@@ -51,14 +68,53 @@ final class AppModel {
     player.onTrackStarted = { [weak library] track in
       library?.markPlayed(track)
     }
-    player.onTrackEnded = { [weak self] _ in
-      self?.advancePlaylist()
+    player.onPlaybackStarted = { [weak self] track in
+      self?.playbackStarted(track)
+    }
+    player.onTrackEnded = { [weak self] track in
+      self?.advanceAfterPlayback(of: track)
+    }
+    player.onTrackFailed = { [weak self] track in
+      self?.playbackFailed(track)
+    }
+    autoplay.onPreparationFinished = { [weak self] in
+      self?.autoplayPreparationFinished()
     }
   }
 
   func play(_ item: SearchResult) {
     playlistSession = nil
     beginPlayback(of: item)
+  }
+
+  func toggleRating(_ rating: SongRating) {
+    guard let item = player.currentTrack?.metadata else { return }
+    let updatedRating: SongRating? = feedback.rating(for: item) == rating ? nil : rating
+    feedback.setRating(updatedRating, for: item)
+    if queuedPlaylistItem(after: item) == nil {
+      prepareNext(after: item)
+    }
+  }
+
+  func toggleAutoplay() {
+    let enabled = !autoplay.isEnabled
+    autoplay.setEnabled(enabled)
+    guard let item = player.currentTrack?.metadata else {
+      if !enabled, waitingForPreparedNext, waitingPlaylistItemID == nil {
+        waitingForPreparedNext = false
+        isPreparingPlayback = false
+        _ = autoplay.cancelPreparation()
+      }
+      return
+    }
+
+    if let queuedNext = queuedPlaylistItem(after: item) {
+      if autoplay.nextItem?.id != queuedNext.id {
+        prepareNext(after: item)
+      }
+      return
+    }
+    prepareNext(after: item)
   }
 
   func keep(_ item: SearchResult) {
@@ -75,9 +131,15 @@ final class AppModel {
 
   func playLibraryTrack(_ track: Track) {
     guard !isShuttingDown else { return }
-    cancelPendingPlayback()
+    nextPreparationBarrier = cancelPendingPlayback()
+    _ = autoplay.cancelPreparation()
+    waitingForPreparedNext = false
+    waitingPlaylistItemID = nil
+    failedPlaybackTrack = nil
     playlistSession = nil
+    isPreparingPlayback = false
     playbackMessage = nil
+    player.stopForReplacement()
     player.play(track)
   }
 
@@ -91,15 +153,38 @@ final class AppModel {
 
   func next() {
     guard !isShuttingDown else { return }
-    cancelPendingPlayback()
-    guard playlistSession != nil else {
+    if waitingForPreparedNext { return }
+
+    if let currentTrack = player.currentTrack {
+      cancelPendingPlayback()
       player.stopForReplacement()
+      advanceAfterPlayback(of: currentTrack)
+      return
+    }
+
+    if let failedPlaybackTrack {
+      cancelPendingPlayback()
+      self.failedPlaybackTrack = nil
+      advanceAfterPlayback(of: failedPlaybackTrack)
+      return
+    }
+
+    cancelPendingPlayback()
+    _ = autoplay.cancelPreparation()
+    guard var session = playlistSession else {
+      isPreparingPlayback = false
       playbackMessage = nil
       player.errorMessage = nil
       return
     }
-    player.stopForReplacement()
-    advancePlaylist()
+    session.index += 1
+    guard session.items.indices.contains(session.index) else {
+      playlistSession = nil
+      isPreparingPlayback = false
+      return
+    }
+    playlistSession = session
+    beginPlayback(of: session.items[session.index], preservePlaylistSession: true)
   }
 
   func previous() {
@@ -113,6 +198,7 @@ final class AppModel {
       return
     }
     cancelPendingPlayback()
+    _ = autoplay.cancelPreparation()
     player.stopForReplacement()
     session.index -= 1
     playlistSession = session
@@ -121,8 +207,12 @@ final class AppModel {
 
   func shutdown() async {
     isShuttingDown = true
+    waitingForPreparedNext = false
+    waitingPlaylistItemID = nil
+    failedPlaybackTrack = nil
     cancelPendingPlayback()
     player.shutdown()
+    await autoplay.shutdown()
     let tasksToFinish = Array(playbackTasks.values)
     for task in tasksToFinish {
       task.cancel()
@@ -140,14 +230,21 @@ final class AppModel {
   private func beginPlayback(of item: SearchResult, preservePlaylistSession: Bool = false) {
     guard !isShuttingDown else { return }
     let previousPlaybackTask = cancelPendingPlayback()
+    let previousAutoplayTask = autoplay.cancelPreparation()
     if !preservePlaylistSession { playlistSession = nil }
+    waitingForPreparedNext = false
+    waitingPlaylistItemID = nil
+    failedPlaybackTrack = nil
     player.stopForReplacement()
     player.errorMessage = nil
     playbackMessage = nil
     let token = UUID()
     playRequestToken = token
 
-    if let keptTrack = library.track(withID: item.id) {
+    if let keptTrack = library.track(withID: item.id),
+      FileManager.default.fileExists(atPath: keptTrack.audioURL.path)
+    {
+      nextPreparationBarrier = previousPlaybackTask ?? nextPreparationBarrier
       isPreparingPlayback = false
       player.play(keptTrack)
       return
@@ -160,6 +257,9 @@ final class AppModel {
       if let previousPlaybackTask {
         await previousPlaybackTask.value
       }
+      if let previousAutoplayTask {
+        await previousAutoplayTask.value
+      }
       do {
         try Task.checkCancellation()
         let stream = try await YTDLPService(toolchain: toolchainStatus)
@@ -168,12 +268,14 @@ final class AppModel {
         guard let self else { return }
         self.finishPlaybackTask(taskID)
         guard self.playRequestToken == token else { return }
+        self.nextPreparationBarrier = nil
         self.isPreparingPlayback = false
         self.player.play(stream: item, resolvedStream: stream)
       } catch {
         guard let self else { return }
         self.finishPlaybackTask(taskID)
         guard self.playRequestToken == token else { return }
+        self.nextPreparationBarrier = nil
         self.isPreparingPlayback = false
         self.playbackMessage = error.localizedDescription
       }
@@ -182,20 +284,162 @@ final class AppModel {
     activePlaybackTaskID = taskID
   }
 
-  private func advancePlaylist() {
+  private func playbackStarted(_ track: PlaybackTrack) {
     guard !isShuttingDown else { return }
-    guard var session = playlistSession else {
-      playlistSession = nil
+    waitingForPreparedNext = false
+    waitingPlaylistItemID = nil
+    failedPlaybackTrack = nil
+    isPreparingPlayback = false
+    playbackMessage = nil
+
+    recentlyPlayedIDs.removeAll { $0 == track.id }
+    recentlyPlayedIDs.append(track.id)
+    if recentlyPlayedIDs.count > 50 {
+      recentlyPlayedIDs.removeFirst(recentlyPlayedIDs.count - 50)
+    }
+    prepareNext(after: track.metadata)
+  }
+
+  private func playbackFailed(_ track: PlaybackTrack) {
+    guard !isShuttingDown else { return }
+    failedPlaybackTrack = track
+    waitingForPreparedNext = false
+    waitingPlaylistItemID = nil
+    isPreparingPlayback = false
+  }
+
+  private func prepareNext(after item: SearchResult) {
+    guard !isShuttingDown else { return }
+    let queuedNext = queuedPlaylistItem(after: item)
+    guard queuedNext != nil || autoplay.isEnabled else {
+      _ = autoplay.cancelPreparation()
       return
     }
-    session.index += 1
-    guard session.items.indices.contains(session.index) else {
+    let barrierTask = nextPreparationBarrier
+    nextPreparationBarrier = nil
+    autoplay.prepareNext(
+      after: item,
+      queuedNext: queuedNext,
+      excluding: Set(recentlyPlayedIDs),
+      toolchain: toolchain.status,
+      waitingFor: barrierTask
+    )
+  }
+
+  private func queuedPlaylistItem(after currentItem: SearchResult) -> SearchResult? {
+    guard let session = playlistSession,
+      session.items.indices.contains(session.index),
+      session.items[session.index].id == currentItem.id
+    else { return nil }
+    let nextIndex = session.index + 1
+    guard session.items.indices.contains(nextIndex) else { return nil }
+    return session.items[nextIndex]
+  }
+
+  private func advanceAfterPlayback(of finishedTrack: PlaybackTrack) {
+    guard !isShuttingDown else { return }
+    player.errorMessage = nil
+    playbackMessage = nil
+
+    if var session = playlistSession {
+      let nextIndex = session.index + 1
+      if session.items.indices.contains(nextIndex) {
+        session.index = nextIndex
+        playlistSession = session
+        let item = session.items[nextIndex]
+        if let prepared = autoplay.consumePrepared(matching: item.id) {
+          startPreparedPlayback(prepared)
+        } else if autoplay.isPreparing, autoplay.nextItem?.id == item.id {
+          waitingForPreparedNext = true
+          waitingPlaylistItemID = item.id
+          isPreparingPlayback = true
+        } else {
+          beginPlayback(of: item, preservePlaylistSession: true)
+        }
+        return
+      }
       playlistSession = nil
+    }
+
+    guard autoplay.isEnabled else {
+      _ = autoplay.cancelPreparation()
       isPreparingPlayback = false
       return
     }
-    playlistSession = session
-    beginPlayback(of: session.items[session.index], preservePlaylistSession: true)
+
+    if let prepared = autoplay.consumePrepared() {
+      startPreparedPlayback(prepared)
+      return
+    }
+
+    if !autoplay.isPreparing {
+      prepareNext(after: finishedTrack.metadata)
+    }
+    guard autoplay.isPreparing else {
+      isPreparingPlayback = false
+      playbackMessage =
+        autoplay.errorMessage ?? AutoplayPreparationError.noRecommendation.localizedDescription
+      return
+    }
+    waitingForPreparedNext = true
+    waitingPlaylistItemID = nil
+    isPreparingPlayback = true
+  }
+
+  private func autoplayPreparationFinished() {
+    guard !isShuttingDown, waitingForPreparedNext else { return }
+
+    if let expectedItemID = waitingPlaylistItemID {
+      if let prepared = autoplay.consumePrepared(matching: expectedItemID) {
+        startPreparedPlayback(prepared)
+        return
+      }
+      guard !autoplay.isPreparing else { return }
+      waitingForPreparedNext = false
+      waitingPlaylistItemID = nil
+      isPreparingPlayback = false
+      guard let session = playlistSession,
+        session.items.indices.contains(session.index),
+        session.items[session.index].id == expectedItemID
+      else {
+        playbackMessage = autoplay.errorMessage
+        return
+      }
+      beginPlayback(of: session.items[session.index], preservePlaylistSession: true)
+      return
+    }
+
+    if let prepared = autoplay.consumePrepared() {
+      startPreparedPlayback(prepared)
+      return
+    }
+    guard !autoplay.isPreparing else { return }
+    waitingForPreparedNext = false
+    isPreparingPlayback = false
+    playbackMessage =
+      autoplay.errorMessage ?? AutoplayPreparationError.noRecommendation.localizedDescription
+  }
+
+  private func startPreparedPlayback(_ prepared: PreparedPlayback) {
+    guard !isShuttingDown else { return }
+    waitingForPreparedNext = false
+    waitingPlaylistItemID = nil
+    isPreparingPlayback = false
+    playbackMessage = nil
+    player.errorMessage = nil
+
+    switch prepared.source {
+    case .local:
+      guard let currentLibraryTrack = library.track(withID: prepared.item.id),
+        FileManager.default.fileExists(atPath: currentLibraryTrack.audioURL.path)
+      else {
+        beginPlayback(of: prepared.item, preservePlaylistSession: playlistSession != nil)
+        return
+      }
+      player.play(currentLibraryTrack)
+    case .stream(let stream):
+      player.play(stream: prepared.item, resolvedStream: stream)
+    }
   }
 
   @discardableResult

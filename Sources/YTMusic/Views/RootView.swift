@@ -45,6 +45,17 @@ struct RootView: View {
     } message: {
       Text(model.playlists.errorMessage ?? "The playlist change could not be saved.")
     }
+    .alert(
+      "Rating Error",
+      isPresented: Binding(
+        get: { model.feedback.errorMessage != nil },
+        set: { if !$0 { model.feedback.errorMessage = nil } }
+      )
+    ) {
+      Button("OK") { model.feedback.errorMessage = nil }
+    } message: {
+      Text(model.feedback.errorMessage ?? "The rating change could not be saved.")
+    }
   }
 
   private var sidebar: some View {

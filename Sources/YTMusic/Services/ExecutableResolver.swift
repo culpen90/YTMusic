@@ -1,6 +1,6 @@
 import Foundation
 
-struct ToolchainStatus: Equatable {
+struct ToolchainStatus: Equatable, Sendable {
   var downloaderURL: URL?
   var ffmpegURL: URL?
   var denoURL: URL?
