@@ -315,7 +315,7 @@ final class YTDLPService {
       "--", url.absoluteString,
     ]
 
-    let result = try await runner.run(
+    let result = try await runDownloaderCommand(
       executableURL: downloaderURL,
       arguments: arguments,
       currentDirectoryURL: stagingDirectory
@@ -577,11 +577,68 @@ final class YTDLPService {
 
   private func runJSON(_ arguments: [String]) async throws -> String {
     guard let downloaderURL = toolchain.downloaderURL else { throw YTDLPError.toolsMissing }
-    let result = try await runner.run(executableURL: downloaderURL, arguments: arguments)
+    let result = try await runDownloaderCommand(
+      executableURL: downloaderURL,
+      arguments: arguments
+    )
     guard result.exitCode == 0 else {
       throw YTDLPError.commandFailed(Self.readableError(from: result))
     }
     return result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  private func runDownloaderCommand(
+    executableURL: URL,
+    arguments: [String],
+    currentDirectoryURL: URL? = nil,
+    onLine: @escaping @Sendable (String, CommandOutputStream) -> Void = { _, _ in }
+  ) async throws -> CommandResult {
+    let result = try await runner.run(
+      executableURL: executableURL,
+      arguments: arguments,
+      currentDirectoryURL: currentDirectoryURL,
+      environment: nil,
+      onLine: onLine
+    )
+    guard Self.shouldRetryWithoutRefusedLoopbackProxy(result, arguments: arguments) else {
+      return result
+    }
+
+    try Task.checkCancellation()
+    return try await runner.run(
+      executableURL: executableURL,
+      arguments: ["--proxy", ""] + arguments,
+      currentDirectoryURL: currentDirectoryURL,
+      environment: nil,
+      onLine: onLine
+    )
+  }
+
+  private static func shouldRetryWithoutRefusedLoopbackProxy(
+    _ result: CommandResult,
+    arguments: [String]
+  ) -> Bool {
+    guard result.exitCode != 0,
+      !arguments.contains("--proxy"),
+      !arguments.contains(where: { $0.hasPrefix("--proxy=") })
+    else { return false }
+
+    let loopbackPatterns = [
+      "connection(host='127.0.0.1',",
+      "connection(host=\"127.0.0.1\",",
+      "connection(host='localhost',",
+      "connection(host=\"localhost\",",
+      "connection(host='::1',",
+      "connection(host=\"::1\",",
+    ]
+
+    // Keep remote proxy failures fail closed. Retry only the refused local-helper shape.
+    return result.stderr.split(whereSeparator: \Character.isNewline).contains { line in
+      let message = line.lowercased()
+      return message.contains("unable to connect to proxy")
+        && message.contains("connection refused")
+        && loopbackPatterns.contains { message.contains($0) }
+    }
   }
 
   private static func readableError(from result: CommandResult) -> String {
