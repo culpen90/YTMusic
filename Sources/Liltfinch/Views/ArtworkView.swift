@@ -16,27 +16,28 @@ struct ArtworkView: View {
   }()
 
   var body: some View {
-    Group {
-      if let localURL, let image = NSImage(contentsOf: localURL) {
-        Image(nsImage: image)
-          .resizable()
-          .scaledToFill()
-      } else if let remoteImage {
-        Image(nsImage: remoteImage)
-          .resizable()
-          .scaledToFill()
-      } else {
-        ZStack {
+    GeometryReader { geometry in
+      ZStack {
+        if let localURL, let image = NSImage(contentsOf: localURL) {
+          Image(nsImage: image)
+            .resizable()
+            .scaledToFill()
+        } else if let remoteImage {
+          Image(nsImage: remoteImage)
+            .resizable()
+            .scaledToFill()
+        } else {
           placeholder
           if isLoading { ProgressView().controlSize(.small) }
         }
       }
-    }
-    .clipped()
-    .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-    .overlay {
-      RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        .strokeBorder(.white.opacity(0.09))
+      .frame(width: geometry.size.width, height: geometry.size.height)
+      .clipped()
+      .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+      .overlay {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+          .strokeBorder(.white.opacity(0.09))
+      }
     }
     .task(id: remoteURL) {
       remoteImage = nil
