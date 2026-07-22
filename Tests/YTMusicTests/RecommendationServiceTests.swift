@@ -137,6 +137,47 @@ final class RecommendationServiceTests: XCTestCase {
     XCTAssertTrue(calls[2].last?.hasPrefix("ytsearch") == true)
   }
 
+  func testPlayedRecommendationFallsThroughToFreshSource() async throws {
+    let runner = ScriptedRecommendationRunner([
+      .success(
+        CommandResult(
+          exitCode: 0,
+          stdout:
+            #"{"id":"BBBBBBBBBBB","title":"Played Song (Official Audio)","channel":"ArtistAVEVO","duration":205,"webpage_url":"https://www.youtube.com/watch?v=BBBBBBBBBBB"}"#,
+          stderr: ""
+        )),
+      .success(
+        CommandResult(
+          exitCode: 0,
+          stdout:
+            #"{"id":"ccccccccccc","title":"Fresh Song","channel":"Artist C","duration":200,"webpage_url":"https://www.youtube.com/watch?v=ccccccccccc"}"#,
+          stderr: ""
+        )),
+    ])
+    let service = YTDLPService(
+      toolchain: ToolchainStatus(downloaderURL: URL(fileURLWithPath: "/usr/bin/true")),
+      runner: runner
+    )
+    var history = AutoplayHistory()
+    history.record(
+      SearchResult(
+        id: "aaaaaaaaaaa",
+        title: "Played Song",
+        artist: "ArtistA - Topic",
+        duration: 180,
+        webpageURLString: "https://www.youtube.com/watch?v=aaaaaaaaaaa",
+        thumbnailURLString: nil))
+
+    let values = try await service.recommendations(for: makeSeed(), excluding: history)
+
+    XCTAssertEqual(values.map(\.id), ["ccccccccccc"])
+    let calls = runner.recordedArguments
+    XCTAssertEqual(calls.count, 2)
+    XCTAssertTrue(calls[0].last?.contains("music.youtube.com") == true)
+    XCTAssertTrue(calls[1].last?.contains("www.youtube.com") == true)
+    XCTAssertEqual(value(after: "--playlist-end", in: calls[0]), "17")
+  }
+
   func testCancellationNeverFallsBack() async {
     let runner = ScriptedRecommendationRunner([
       .failure(SubprocessError.cancelled),

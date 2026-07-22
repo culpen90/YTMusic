@@ -7,7 +7,7 @@ Its storage rule is deliberate:
 - **Play Once** resolves a stereo AAC source and streams it directly through AVPlayer. It does not create an app-managed audio file or wait for the whole song to download.
 - **Download** is the only action that keeps an audio file. Kept songs appear in the offline Library.
 - **Playlists store URLs only.** Each entry contains a YouTube URL plus lightweight display metadata. Links can be added while metadata lookup is unavailable. Playback uses an existing Library copy when available; otherwise it streams the song without saving it.
-- **Autoplay prepares the handoff.** While a song is playing, YTMusic chooses a radio recommendation and resolves its transient stream in the background. Playlist order takes priority, and radio continues after the final playlist song when Autoplay is on.
+- **Autoplay prepares the handoff without repeats.** While a song is playing, YTMusic chooses an unheard radio recommendation and resolves its transient stream in the background. Listening history stays in memory for the current app session and recognizes common YouTube labels such as “Official Audio,” while duration and version labels keep distinct recordings separate. Playlist order takes priority, and radio continues after the final playlist song when Autoplay is on.
 - **Thumbs tune future choices.** Likes and dislikes are stored locally as lightweight song metadata. One thumbs up adds a song to Favorites and stays selected; removing it from Favorites or choosing thumbs down takes it back out. Disliked songs are excluded, and feedback about an artist changes how later radio candidates are ranked.
 
 ## Requirements

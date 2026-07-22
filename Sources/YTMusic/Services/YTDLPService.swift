@@ -184,9 +184,11 @@ final class YTDLPService {
     return envelope.entries
   }
 
-  func recommendations(for item: SearchResult, limit: Int = 15) async throws
-    -> [SearchResult]
-  {
+  func recommendations(
+    for item: SearchResult,
+    excluding history: AutoplayHistory = AutoplayHistory(),
+    limit: Int = 15
+  ) async throws -> [SearchResult] {
     guard limit > 0 else { return [] }
     guard toolchain.downloaderURL != nil else { throw YTDLPError.downloaderMissing }
     guard Self.isValidYouTubeVideoID(item.id) else {
@@ -195,6 +197,9 @@ final class YTDLPService {
 
     var lastError: Error?
     var receivedValidResponse = false
+    let desiredCount = min(limit, 49)
+    let additionalCount = min(history.playedIDs.count, 49 - desiredCount)
+    let sourceLimit = desiredCount + additionalCount
 
     for source in RecommendationSource.allCases {
       try Task.checkCancellation()
@@ -203,17 +208,20 @@ final class YTDLPService {
           Self.recommendationArguments(
             for: item,
             source: source,
-            limit: limit,
+            limit: sourceLimit,
             denoURL: toolchain.denoURL
           ))
         try Task.checkCancellation()
         let candidates = try Self.parseRecommendations(
           response,
           seedVideoID: item.id,
-          limit: limit
+          limit: sourceLimit
         )
         receivedValidResponse = true
-        if !candidates.isEmpty { return candidates }
+        let unheardCandidates = candidates.filter { !history.contains($0) }
+        if !unheardCandidates.isEmpty {
+          return Array(unheardCandidates.prefix(desiredCount))
+        }
       } catch {
         if Self.isCancellation(error) { throw error }
         lastError = error

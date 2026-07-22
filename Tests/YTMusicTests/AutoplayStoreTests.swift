@@ -77,6 +77,110 @@ final class AutoplayStoreTests: XCTestCase {
     await harness.store.shutdown()
   }
 
+  func testPreparationSkipsPlayedTrackAndEquivalentUpload() async throws {
+    let recommendations = RecommendationGate()
+    let streams = StreamGate()
+    let harness = makeHarness(recommendations: recommendations, streams: streams)
+    let seed = song(id: "seed")
+    let played = song(id: "played", artist: "Example Artist", title: "Already Heard")
+    let equivalentUpload = song(
+      id: "alternate-upload",
+      artist: " example artist - Topic ",
+      title: "  ALREADY   HEARD ")
+    let fresh = song(id: "fresh", title: "Something New")
+    let finished = expectation(description: "fresh recommendation prepared")
+    harness.store.onPreparationFinished = { finished.fulfill() }
+    harness.store.recordPlayback(of: played)
+
+    harness.store.prepareNext(
+      after: seed,
+      queuedNext: nil,
+      toolchain: ToolchainStatus())
+    let recommendationRequest = await recommendations.nextRequest()
+    await recommendations.succeed(
+      recommendationRequest,
+      with: [played, equivalentUpload, fresh])
+
+    let streamRequest = await streams.nextRequest()
+    XCTAssertEqual(streamRequest.input, fresh)
+    await streams.succeed(streamRequest, with: stream(id: fresh.id))
+    await fulfillment(of: [finished], timeout: 2)
+
+    XCTAssertEqual(harness.store.preparedPlayback?.item, fresh)
+    let streamCallCount = await streams.callCount()
+    XCTAssertEqual(streamCallCount, 1)
+    await harness.store.shutdown()
+  }
+
+  func testPreparationStopsWhenEveryRecommendationWasPlayed() async throws {
+    let recommendations = RecommendationGate()
+    let streams = StreamGate()
+    let harness = makeHarness(recommendations: recommendations, streams: streams)
+    let seed = song(id: "seed")
+    let played = song(id: "played")
+    let equivalentUpload = song(id: "alternate", title: played.title)
+    let finished = expectation(description: "preparation finished without a repeat")
+    harness.store.onPreparationFinished = { finished.fulfill() }
+    harness.store.recordPlayback(of: played)
+
+    harness.store.prepareNext(
+      after: seed,
+      queuedNext: nil,
+      toolchain: ToolchainStatus())
+    let recommendationRequest = await recommendations.nextRequest()
+    await recommendations.succeed(recommendationRequest, with: [played, equivalentUpload])
+    await fulfillment(of: [finished], timeout: 2)
+
+    XCTAssertNil(harness.store.nextItem)
+    XCTAssertNil(harness.store.preparedPlayback)
+    XCTAssertEqual(
+      harness.store.errorMessage,
+      AutoplayPreparationError.noRecommendation.localizedDescription)
+    let streamCallCount = await streams.callCount()
+    XCTAssertEqual(streamCallCount, 0)
+    await harness.store.shutdown()
+  }
+
+  func testPlaybackHistoryDoesNotEvictOlderTracks() {
+    var history = AutoplayHistory()
+    let tracks = (0..<75).map { song(id: "song-\($0)") }
+
+    for track in tracks {
+      history.record(track)
+    }
+
+    XCTAssertEqual(history.playedIDs.count, tracks.count)
+    XCTAssertTrue(history.contains(tracks[0]))
+    XCTAssertTrue(history.contains(tracks[50]))
+    XCTAssertTrue(history.contains(tracks[74]))
+  }
+
+  func testPlaybackHistoryKeepsDistinctSongVersionsEligible() {
+    var history = AutoplayHistory()
+    history.record(song(id: "studio", title: "Example Song", duration: 180))
+
+    XCTAssertFalse(
+      history.contains(song(id: "live", title: "Example Song (Live)", duration: 240)))
+    XCTAssertFalse(
+      history.contains(song(id: "remaster", title: "Example Song (2026 Remaster)", duration: 185)))
+    XCTAssertFalse(
+      history.contains(song(id: "extended", title: "Example Song", duration: 240)))
+  }
+
+  func testPlaybackHistoryMatchesCommonYouTubePresentationLabels() {
+    var history = AutoplayHistory()
+    history.record(
+      song(id: "audio", artist: "Example Artist - Topic", title: "Example Song", duration: 180))
+
+    XCTAssertTrue(
+      history.contains(
+        song(
+          id: "video",
+          artist: "Example ArtistVEVO",
+          title: "Example Song (Official Music Video)",
+          duration: 205)))
+  }
+
   func testPreparedPlaybackCanOnlyBeConsumedOnce() async throws {
     let recommendations = RecommendationGate()
     let streams = StreamGate()
@@ -117,6 +221,7 @@ final class AutoplayStoreTests: XCTestCase {
     let finished = expectation(description: "queued item prepared")
     harness.store.onPreparationFinished = { finished.fulfill() }
     harness.store.setEnabled(false)
+    harness.store.recordPlayback(of: queued)
 
     harness.store.prepareNext(
       after: seed,
@@ -419,7 +524,7 @@ final class AutoplayStoreTests: XCTestCase {
       defaults: defaults,
       preferenceKey: "autoplayEnabled",
       now: { self.preparedAt },
-      recommendationLoader: { _, item in
+      recommendationLoader: { _, item, _ in
         try await recommendations.call(item)
       },
       streamResolver: { _, item in
@@ -430,13 +535,15 @@ final class AutoplayStoreTests: XCTestCase {
 
   private func song(
     id: String,
-    artist: String = "Example Artist"
+    artist: String = "Example Artist",
+    title: String? = nil,
+    duration: Double? = 180
   ) -> SearchResult {
     SearchResult(
       id: id,
-      title: "Song \(id)",
+      title: title ?? "Song \(id)",
       artist: artist,
-      duration: 180,
+      duration: duration,
       webpageURLString: "https://www.youtube.com/watch?v=\(id)",
       thumbnailURLString: nil)
   }

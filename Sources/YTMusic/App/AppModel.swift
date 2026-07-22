@@ -35,7 +35,6 @@ final class AppModel {
   private var playbackTasks: [UUID: Task<Void, Never>] = [:]
   private var activePlaybackTaskID: UUID?
   private var failedPlaybackTrack: PlaybackTrack?
-  private var recentlyPlayedIDs: [String] = []
   private var nextPreparationBarrier: Task<Void, Never>?
   private var waitingForPreparedNext = false
   private var waitingPlaylistItemID: String?
@@ -315,11 +314,7 @@ final class AppModel {
     isPreparingPlayback = false
     playbackMessage = nil
 
-    recentlyPlayedIDs.removeAll { $0 == track.id }
-    recentlyPlayedIDs.append(track.id)
-    if recentlyPlayedIDs.count > 50 {
-      recentlyPlayedIDs.removeFirst(recentlyPlayedIDs.count - 50)
-    }
+    autoplay.recordPlayback(of: track.metadata)
     prepareNext(after: track.metadata)
   }
 
@@ -343,7 +338,6 @@ final class AppModel {
     autoplay.prepareNext(
       after: item,
       queuedNext: queuedNext,
-      excluding: Set(recentlyPlayedIDs),
       toolchain: toolchain.status,
       waitingFor: barrierTask
     )

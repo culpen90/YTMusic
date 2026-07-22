@@ -34,7 +34,7 @@ struct PreparedPlayback {
 @Observable
 final class AutoplayStore {
   typealias RecommendationLoader =
-    @Sendable (ToolchainStatus, SearchResult) async throws ->
+    @Sendable (ToolchainStatus, SearchResult, AutoplayHistory) async throws ->
     [SearchResult]
   typealias StreamResolver =
     @Sendable (ToolchainStatus, SearchResult) async throws -> PlaybackStream
@@ -58,6 +58,7 @@ final class AutoplayStore {
   private var taskToAwait: Task<Void, Never>?
   private var generation = UUID()
   private var isShuttingDown = false
+  private var playbackHistory = AutoplayHistory()
 
   init(
     feedback: FeedbackStore,
@@ -65,8 +66,10 @@ final class AutoplayStore {
     defaults: UserDefaults = .standard,
     preferenceKey: String = "autoplayEnabled",
     now: @escaping @Sendable () -> Date = { Date() },
-    recommendationLoader: @escaping RecommendationLoader = { toolchain, item in
-      try await YTDLPService(toolchain: toolchain).recommendations(for: item)
+    recommendationLoader: @escaping RecommendationLoader = { toolchain, item, history in
+      try await YTDLPService(toolchain: toolchain).recommendations(
+        for: item,
+        excluding: history)
     },
     streamResolver: @escaping StreamResolver = { toolchain, item in
       try await YTDLPService(toolchain: toolchain).resolvePlaybackStream(for: item)
@@ -88,10 +91,14 @@ final class AutoplayStore {
     defaults.set(enabled, forKey: preferenceKey)
   }
 
+  func recordPlayback(of item: SearchResult) {
+    playbackHistory.record(item)
+  }
+
   func prepareNext(
     after currentItem: SearchResult,
     queuedNext: SearchResult?,
-    excluding excludedIDs: Set<String>,
+    excluding excludedIDs: Set<String> = [],
     toolchain: ToolchainStatus,
     waitingFor barrierTask: Task<Void, Never>? = nil
   ) {
@@ -105,6 +112,9 @@ final class AutoplayStore {
     isPreparing = true
     nextItem = queuedNext
     errorMessage = nil
+    var history = playbackHistory
+    history.record(currentItem)
+    history.exclude(ids: excludedIDs)
 
     let task = Task { [weak self] in
       if let previousTask { await previousTask.value }
@@ -117,15 +127,17 @@ final class AutoplayStore {
         if let queuedNext {
           candidates = [queuedNext]
         } else {
-          let loadedCandidates = try await self.recommendationLoader(toolchain, currentItem)
+          let loadedCandidates = try await self.recommendationLoader(
+            toolchain,
+            currentItem,
+            history)
           try Task.checkCancellation()
           guard self.generation == requestGeneration, !self.isShuttingDown else { return }
-          var exclusions = excludedIDs
-          exclusions.insert(currentItem.id)
           candidates = self.feedback.rankedRecommendations(
             from: loadedCandidates,
-            excluding: exclusions
+            excluding: history.playedIDs
           )
+          .filter { !history.contains($0) }
           guard !candidates.isEmpty else {
             throw AutoplayPreparationError.noRecommendation
           }
