@@ -172,7 +172,7 @@ private struct AddPlaylistURLsSheet: View {
       Text("Add YouTube URLs")
         .font(.title2.bold())
       Text(
-        "Paste one video URL per line. YTMusic stores the URL and small display metadata; links can still be saved when metadata is temporarily unavailable."
+        "Paste one video URL per line. Liltfinch stores the URL and small display metadata; links can still be saved when metadata is temporarily unavailable."
       )
       .foregroundStyle(.secondary)
       .fixedSize(horizontal: false, vertical: true)

@@ -1,6 +1,6 @@
 import XCTest
 
-@testable import YTMusic
+@testable import Liltfinch
 
 final class PlaybackStreamTests: XCTestCase {
   func testParsesAllowedStreamURLAndUserAgent() throws {

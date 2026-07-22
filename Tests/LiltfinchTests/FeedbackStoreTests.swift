@@ -1,6 +1,6 @@
 import XCTest
 
-@testable import YTMusic
+@testable import Liltfinch
 
 @MainActor
 final class FeedbackStoreTests: XCTestCase {
@@ -10,7 +10,7 @@ final class FeedbackStoreTests: XCTestCase {
   override func setUpWithError() throws {
     try super.setUpWithError()
     baseDirectory = FileManager.default.temporaryDirectory
-      .appendingPathComponent("YTMusicFeedbackTests-\(UUID().uuidString)", isDirectory: true)
+      .appendingPathComponent("LiltfinchFeedbackTests-\(UUID().uuidString)", isDirectory: true)
     rootDirectory = baseDirectory.appendingPathComponent("Library", isDirectory: true)
     try FileManager.default.createDirectory(at: rootDirectory, withIntermediateDirectories: true)
   }

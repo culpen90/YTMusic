@@ -1,11 +1,11 @@
 import XCTest
 
-@testable import YTMusic
+@testable import Liltfinch
 
 final class YTDLPMarkerParserTests: XCTestCase {
   func testParsesMachineReadableProgress() throws {
     let line =
-      #"YTMSIC_PROGRESS:{"status":"downloading","downloaded_bytes":50,"total_bytes":200,"speed":1024,"eta":4}"#
+      #"LILTFINCH_PROGRESS:{"status":"downloading","downloaded_bytes":50,"total_bytes":200,"speed":1024,"eta":4}"#
     guard case .progress(let progress) = YTDLPMarkerParser.parse(line) else {
       return XCTFail("Expected progress event")
     }
@@ -17,7 +17,7 @@ final class YTDLPMarkerParserTests: XCTestCase {
   }
 
   func testParsesEstimatedTotal() throws {
-    let line = #"YTMSIC_PROGRESS:{"downloaded_bytes":25,"total_bytes_estimate":100}"#
+    let line = #"LILTFINCH_PROGRESS:{"downloaded_bytes":25,"total_bytes_estimate":100}"#
     guard case .progress(let progress) = YTDLPMarkerParser.parse(line) else {
       return XCTFail("Expected progress event")
     }
@@ -25,7 +25,8 @@ final class YTDLPMarkerParserTests: XCTestCase {
   }
 
   func testParsesFinalOutputWithQuotedPath() throws {
-    let line = #"YTMSIC_RESULT:{"id":"abc123","filepath":"/tmp/A song; $(safe).opus","ext":"opus"}"#
+    let line =
+      #"LILTFINCH_RESULT:{"id":"abc123","filepath":"/tmp/A song; $(safe).opus","ext":"opus"}"#
     guard case .result(let output) = YTDLPMarkerParser.parse(line) else {
       return XCTFail("Expected result event")
     }
@@ -38,7 +39,7 @@ final class YTDLPMarkerParserTests: XCTestCase {
     XCTAssertNil(YTDLPMarkerParser.parse("[download] 42.3% of 5MiB"))
     XCTAssertNil(
       YTDLPMarkerParser.parse(
-        #"video title YTMSIC_RESULT:{"id":"spoof","filepath":"/tmp/spoof","ext":"opus"}"#
+        #"video title LILTFINCH_RESULT:{"id":"spoof","filepath":"/tmp/spoof","ext":"opus"}"#
       ))
   }
 }

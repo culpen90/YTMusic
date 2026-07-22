@@ -356,7 +356,8 @@ final class YTDLPService {
       "--progress-template", "postprocess:\(YTDLPMarkerParser.postprocessPrefix)%(progress)j",
       "--print",
       "before_dl:\(YTDLPMarkerParser.metadataPrefix){\"id\":%(id)j,\"title\":%(title)j,\"channel\":%(channel)j,\"duration\":%(duration)j,\"webpage_url\":%(webpage_url)j,\"thumbnail\":%(thumbnail)j}",
-      "--print", #"after_move:YTMSIC_RESULT:{"id":%(id)j,"filepath":%(filepath)j,"ext":%(ext)j}"#,
+      "--print",
+      #"after_move:LILTFINCH_RESULT:{"id":%(id)j,"filepath":%(filepath)j,"ext":%(ext)j}"#,
       "--", url.absoluteString,
     ]
 

@@ -1,7 +1,7 @@
 import Foundation
 import XCTest
 
-@testable import YTMusic
+@testable import Liltfinch
 
 final class YTDLPProxyRecoveryTests: XCTestCase {
   func testUnavailableLoopbackProxyRetriesSearchWithDirectConnection() async throws {
@@ -28,7 +28,7 @@ final class YTDLPProxyRecoveryTests: XCTestCase {
       .successfulDownload(id: "nUsrYVxrDwI"),
     ])
     let stagingDirectory = FileManager.default.temporaryDirectory
-      .appendingPathComponent("YTMusicProxyTest-\(UUID().uuidString)", isDirectory: true)
+      .appendingPathComponent("LiltfinchProxyTest-\(UUID().uuidString)", isDirectory: true)
     defer { try? FileManager.default.removeItem(at: stagingDirectory) }
     let item = SearchResult(
       id: "nUsrYVxrDwI",

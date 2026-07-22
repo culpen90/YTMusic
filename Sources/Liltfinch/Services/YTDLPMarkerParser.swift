@@ -39,10 +39,10 @@ enum YTDLPEvent: Sendable {
 }
 
 enum YTDLPMarkerParser {
-  static let progressPrefix = "YTMSIC_PROGRESS:"
-  static let postprocessPrefix = "YTMSIC_POSTPROCESS:"
-  static let metadataPrefix = "YTMSIC_META:"
-  static let resultPrefix = "YTMSIC_RESULT:"
+  static let progressPrefix = "LILTFINCH_PROGRESS:"
+  static let postprocessPrefix = "LILTFINCH_POSTPROCESS:"
+  static let metadataPrefix = "LILTFINCH_META:"
+  static let resultPrefix = "LILTFINCH_RESULT:"
 
   static func parse(_ line: String, decoder: JSONDecoder = JSONDecoder()) -> YTDLPEvent? {
     let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)

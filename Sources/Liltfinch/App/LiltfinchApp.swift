@@ -3,12 +3,13 @@ import SwiftUI
 
 @main
 @MainActor
-struct YTMusicApp: App {
+struct LiltfinchApp: App {
   @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
   @State private var model: AppModel
 
   init() {
     ProcessGroupLauncher.launchIfRequested()
+    AppMigration.migrateLegacyPreferences()
     _model = State(initialValue: AppModel())
   }
 
