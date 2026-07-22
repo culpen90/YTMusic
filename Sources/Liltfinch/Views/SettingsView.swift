@@ -49,6 +49,10 @@ struct SettingsView: View {
         Label("Playlists retain URLs and display metadata only.", systemImage: "link.circle")
       }
 
+      Section("About Liltfinch") {
+        LabeledContent("Version", value: appVersion)
+      }
+
       Section {
         Text(
           "Only download media you own or have permission to save. Liltfinch does not bypass DRM, private access, or platform restrictions."
@@ -58,6 +62,12 @@ struct SettingsView: View {
       }
     }
     .formStyle(.grouped)
+  }
+
+  private var appVersion: String {
+    Bundle.main.object(forInfoDictionaryKey: "LiltfinchVersion") as? String
+      ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+      ?? "Development"
   }
 
   private var tools: some View {
